@@ -3,5 +3,5 @@
 
 /// Launches the Tauri application.
 fn main() {
-  app_lib::run();
+    app_lib::run();
 }
