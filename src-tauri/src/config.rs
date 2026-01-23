@@ -1,3 +1,4 @@
+use crate::watcher::FileWatcher;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,7 +8,7 @@ use tauri::State;
 /// Configuration structure for the application.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AppConfig {
-    /// The user-configured path to the game's save directory.
+    /// The user-configured path to the game's save directory or file.
     pub save_path: Option<String>,
 }
 
@@ -15,9 +16,6 @@ pub struct AppConfig {
 pub struct ConfigState(pub Mutex<AppConfig>);
 
 /// Resolves the path to the configuration file.
-///
-/// Attempts to locate `config.json` in the same directory as the executable.
-/// Defaults to `config.json` in the current working directory if the executable path cannot be determined.
 fn get_config_path() -> PathBuf {
     std::env::current_exe()
         .map(|p| p.parent().unwrap_or(Path::new(".")).join("config.json"))
@@ -25,8 +23,6 @@ fn get_config_path() -> PathBuf {
 }
 
 /// Loads configuration from a specific file path.
-///
-/// Returns `AppConfig::default()` if the file does not exist or cannot be parsed.
 pub fn load_config_from_path(path: &Path) -> AppConfig {
     log::info!("Loading configuration from: {:?}", path);
     if path.exists() {
@@ -51,9 +47,9 @@ pub fn load_initial_config() -> AppConfig {
     load_config_from_path(&get_config_path())
 }
 
-/// Validates if the provided string is a valid directory path.
-fn is_valid_dir(path: &str) -> bool {
-    Path::new(path).is_dir()
+/// Validates if the provided string is a valid path (file or directory).
+fn is_valid_path(path: &str) -> bool {
+    Path::new(path).exists()
 }
 
 /// Retrieves the current application configuration.
@@ -66,24 +62,27 @@ pub fn get_config(state: State<ConfigState>) -> Result<AppConfig, String> {
     })
 }
 
-/// Sets the save path in the configuration and persists it to disk.
-///
-/// Validates that the path exists and is a directory before saving.
+/// Sets the save path in the configuration, persists it, and updates the watcher.
 #[tauri::command]
-pub fn set_save_path(state: State<ConfigState>, path: String) -> Result<(), String> {
+pub fn set_save_path(
+    config_state: State<ConfigState>,
+    watcher: State<FileWatcher>,
+    path: String,
+) -> Result<(), String> {
     log::info!("Attempting to set save path to: {}", path);
 
-    if !is_valid_dir(&path) {
-        log::warn!("Validation failed: Path does not exist or is not a directory");
-        return Err("The provided path does not exist or is not a directory.".to_string());
+    if !is_valid_path(&path) {
+        log::warn!("Validation failed: Path does not exist");
+        return Err("The provided path does not exist.".to_string());
     }
 
-    let mut config = state.0.lock().map_err(|e| {
+    // Update Config
+    let mut config = config_state.0.lock().map_err(|e| {
         log::error!("Failed to acquire lock on configuration state: {}", e);
         "Failed to acquire lock on configuration state".to_string()
     })?;
 
-    config.save_path = Some(path);
+    config.save_path = Some(path.clone());
 
     let config_path = get_config_path();
     let json = serde_json::to_string_pretty(&*config).map_err(|e| {
@@ -97,13 +96,25 @@ pub fn set_save_path(state: State<ConfigState>, path: String) -> Result<(), Stri
     })?;
 
     log::info!("Configuration saved successfully to {:?}", config_path);
+
+    // Update Watcher
+    // We do this after saving config
+    let path_buf = PathBuf::from(path);
+    if let Err(e) = watcher.start(path_buf) {
+        log::error!("Failed to start watcher: {}", e);
+        return Err(format!(
+            "Configuration saved, but failed to start watcher: {}",
+            e
+        ));
+    }
+
     Ok(())
 }
 
-/// Checks if a path is valid (exists and is a directory).
+/// Checks if a path is valid.
 #[tauri::command]
 pub fn validate_path(path: String) -> bool {
-    let is_valid = is_valid_dir(&path);
+    let is_valid = is_valid_path(&path);
     log::info!("Validating path '{}': {}", path, is_valid);
     is_valid
 }
@@ -111,6 +122,7 @@ pub fn validate_path(path: String) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use tempfile::tempdir;
 
     /// Tests that the AppConfig struct serializes to the expected JSON format.
@@ -126,15 +138,25 @@ mod tests {
     /// Tests that an invalid path string returns false.
     #[test]
     fn test_validate_path_invalid() {
-        assert!(!is_valid_dir("::invalid::path::??"));
+        assert!(!is_valid_path("::invalid::path::??"));
     }
 
     /// Tests that a valid directory path returns true.
     #[test]
-    fn test_validate_path_valid() {
+    fn test_validate_path_valid_dir() {
         let temp_dir = tempdir().expect("failed to create temp dir");
         let path_str = temp_dir.path().to_string_lossy().to_string();
-        assert!(is_valid_dir(&path_str));
+        assert!(is_valid_path(&path_str));
+    }
+
+    /// Tests that a valid file path returns true.
+    #[test]
+    fn test_validate_path_valid_file() {
+        let temp_dir = tempdir().expect("failed to create temp dir");
+        let file_path = temp_dir.path().join("test.sav");
+        File::create(&file_path).unwrap();
+        let path_str = file_path.to_string_lossy().to_string();
+        assert!(is_valid_path(&path_str));
     }
 
     /// Tests loading configuration from an existing file.
