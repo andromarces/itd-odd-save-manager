@@ -60,12 +60,10 @@ fn is_valid_dir(path: &str) -> bool {
 #[tauri::command]
 pub fn get_config(state: State<ConfigState>) -> Result<AppConfig, String> {
     log::info!("Retrieving configuration");
-    state.0.lock()
-        .map(|config| config.clone())
-        .map_err(|e| {
-            log::error!("Failed to access configuration state: {}", e);
-            "Failed to access configuration state".to_string()
-        })
+    state.0.lock().map(|config| config.clone()).map_err(|e| {
+        log::error!("Failed to access configuration state: {}", e);
+        "Failed to access configuration state".to_string()
+    })
 }
 
 /// Sets the save path in the configuration and persists it to disk.
@@ -74,33 +72,30 @@ pub fn get_config(state: State<ConfigState>) -> Result<AppConfig, String> {
 #[tauri::command]
 pub fn set_save_path(state: State<ConfigState>, path: String) -> Result<(), String> {
     log::info!("Attempting to set save path to: {}", path);
-    
+
     if !is_valid_dir(&path) {
         log::warn!("Validation failed: Path does not exist or is not a directory");
         return Err("The provided path does not exist or is not a directory.".to_string());
     }
 
-    let mut config = state.0.lock()
-        .map_err(|e| {
-            log::error!("Failed to acquire lock on configuration state: {}", e);
-            "Failed to acquire lock on configuration state".to_string()
-        })?;
-    
+    let mut config = state.0.lock().map_err(|e| {
+        log::error!("Failed to acquire lock on configuration state: {}", e);
+        "Failed to acquire lock on configuration state".to_string()
+    })?;
+
     config.save_path = Some(path);
-    
+
     let config_path = get_config_path();
-    let json = serde_json::to_string_pretty(&*config)
-        .map_err(|e| {
-            log::error!("Failed to serialize config: {}", e);
-            format!("Failed to serialize config: {}", e)
-        })?;
-    
-    fs::write(&config_path, json)
-        .map_err(|e| {
-            log::error!("Failed to write config file: {}", e);
-            format!("Failed to write config file: {}", e)
-        })?;
-        
+    let json = serde_json::to_string_pretty(&*config).map_err(|e| {
+        log::error!("Failed to serialize config: {}", e);
+        format!("Failed to serialize config: {}", e)
+    })?;
+
+    fs::write(&config_path, json).map_err(|e| {
+        log::error!("Failed to write config file: {}", e);
+        format!("Failed to write config file: {}", e)
+    })?;
+
     log::info!("Configuration saved successfully to {:?}", config_path);
     Ok(())
 }
@@ -156,13 +151,13 @@ mod tests {
         let loaded = load_config_from_path(&config_path);
         assert_eq!(loaded.save_path, Some("TestPath".to_string()));
     }
-    
+
     /// Tests loading configuration from a missing file returns default.
     #[test]
     fn test_load_config_from_path_missing() {
         let temp_dir = tempdir().expect("failed to create temp dir");
         let config_path = temp_dir.path().join("missing.json");
-        
+
         let loaded = load_config_from_path(&config_path);
         assert!(loaded.save_path.is_none());
     }
