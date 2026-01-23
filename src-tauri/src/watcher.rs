@@ -151,7 +151,7 @@ fn debounce_loop(
                     } else {
                         // If watching a directory, any .sav file is relevant (case-insensitive)
                         path.extension()
-                            .map_or(false, |ext| ext.to_string_lossy().to_lowercase() == "sav")
+                            .is_some_and(|ext| ext.to_string_lossy().to_lowercase() == "sav")
                     };
 
                     if is_relevant {
