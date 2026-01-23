@@ -1,23 +1,44 @@
 # ITD ODD Save Manager
 
-Portable auto‑save backup app for _Into the Dead: Our Darkest Days_. The initial focus is high‑level implementation options based on how the game saves, with a preference for free tooling and low‑effort maintenance.
+Portable auto‑save backup app for _Into the Dead: Our Darkest Days_.
 
-## Scope
+## Features
 
-- Identify how the game saves and where files live.
-- Propose high‑level implementation options (no deep details yet).
-- Keep the solution portable and easy to build.
+- **Auto-Detection**: Automatically finds Steam save locations.
+- **Manual Override**: Allows selecting any custom folder or file to watch.
+- **Automated Backups**: Watches for changes and creates timestamped backups instantly.
+- **Smart Restore**: browse and restore backups with a single click.
+- **Steam Cloud Awareness**: Detects and warns about Steam Cloud conflicts.
+- **Game Integration**:
+  - Launch the game directly from the app.
+  - **Auto-Launch**: Optional setting to launch the game when the app starts.
+  - **Auto-Close**: Optional setting to close the app automatically when the game exits.
+- **System Tray**:
+  - Minimizes to system tray when closed.
+  - Quick actions (Open, Launch Game, Quit) from the tray icon.
+  - Monitors game status in the background.
 
-## Functional Features
+## Usage
 
-- Auto‑detect save location(s) for the game.
-- Manual override to specify save location(s).
-- File‑watcher‑based backups aligned to day/night cycle changes.
-- “Cycle detection” or event coalescing to avoid excessive backups.
-- Backups stored in subfolders next to the save files.
-- Restore picker to revert to a chosen backup snapshot.
-- Steam Cloud‑aware mode (warnings/guardrails).
-- Optional auto‑launch and auto‑close tied to the game.
+### Configuration
+
+1. **Save Path**: The app attempts to auto-detect your save path. If incorrect, enter the path manually in the "Active Configuration" section.
+2. **Game Settings**:
+   - Check **Auto-launch game** to start the game immediately when opening this manager.
+   - Check **Close app when game exits** to shut down the manager automatically after you finish playing.
+
+### Backups & Restore
+
+- **Backups** are created automatically whenever the game saves.
+- To **Restore**, click the "Restore" button next to a backup entry.
+  - _Warning_: Restoring overwrites your current save.
+  - If using Steam Cloud, you may need to disable it or go offline to prevent Steam from reverting your restore.
+
+### System Tray
+
+- Closing the window minimizes the app to the System Tray.
+- Right-click the tray icon to access the menu.
+- Use "Quit" from the tray menu to fully exit the application.
 
 ## Steam Cloud Support
 
@@ -28,30 +49,6 @@ The application automatically detects if your save files are located within the 
 - **Conflict**: Steam Cloud may overwrite your restored file with its own cloud copy upon game launch. To prevent this, consider:
   - Disabling Steam Cloud for this game.
   - Launching Steam in Offline Mode.
-
-## Non‑Functional / UX
-
-- Tray app with a normal window when not minimized.
-- Low resource usage; must not slow PC or game.
-- Portable; no installer.
-- Prefer a single‑EXE build if possible.
-- Free tooling preferred and easy to implement/maintain.
-
-## Platform / Store
-
-- Primary: Steam on Windows.
-- Ideally support other stores/installs via auto‑detect + manual path.
-- Open to macOS/Linux alternatives; can drop Windows‑only features if needed.
-
-## Key Design Decisions
-
-- Favor event‑driven file watching over polling for low resource use.
-- Keep backups adjacent to save files for portability and easy discovery.
-- Treat cross‑OS support as a possible pivot that may require different tech.
-
-## License
-
-See `LICENSE.md`.
 
 ## Development
 
@@ -65,3 +62,11 @@ See `LICENSE.md`.
 1. Clone the repository.
 2. Run `npm install` to install dependencies and configure git hooks.
    - This project uses a `pre-commit` hook to enforce Rust formatting.
+
+### Build
+
+- Run `npm run dev` for development.
+- Run `npm run build` to create the production executable.
+- The compiled executable will be located in:
+  - `src-tauri/target/release/ITD ODD Save Manager.exe` (Windows)
+  - This file is portable and can be moved/run from anywhere.

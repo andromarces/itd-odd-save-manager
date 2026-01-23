@@ -3,6 +3,8 @@ import './style.css'
 
 interface AppConfig {
   save_path: string | null
+  auto_launch_game: boolean
+  auto_close: boolean
 }
 
 interface BackupInfo {
@@ -28,6 +30,23 @@ app.innerHTML = `
         Manage your save files for Into the Dead: Our Darkest Days.
       </p>
     </header>
+
+    <section class="panel">
+      <h2>Game Launcher</h2>
+      <div class="actions">
+        <button id="launch-game" type="button" class="primary">Launch Game</button>
+      </div>
+      <div class="checkbox-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="auto-launch-check" />
+          Auto-launch game when app starts
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="auto-close-check" />
+          Close app when game exits
+        </label>
+      </div>
+    </section>
 
     <section class="panel">
       <h2>Active Configuration</h2>
@@ -60,6 +79,11 @@ app.innerHTML = `
     </section>
 
     <section class="panel">
+      <h2>Activity Log</h2>
+      <div id="activity-log" class="log-box"></div>
+    </section>
+
+    <section class="panel">
       <h2>Discovery</h2>
       <div class="actions">
         <button id="detect" type="button">Auto Detect Steam Paths</button>
@@ -69,6 +93,7 @@ app.innerHTML = `
   </main>
 `
 
+// Elements
 const detectButton = document.querySelector<HTMLButtonElement>('#detect')
 const pathsList = document.querySelector<HTMLUListElement>('#paths')
 const manualInput = document.querySelector<HTMLInputElement>('#manual-path')
@@ -76,9 +101,31 @@ const saveButton = document.querySelector<HTMLButtonElement>('#save-config')
 const configStatus = document.querySelector<HTMLParagraphElement>('#config-status')
 const refreshBackupsButton = document.querySelector<HTMLButtonElement>('#refresh-backups')
 const backupsList = document.querySelector<HTMLTableSectionElement>('#backups-list')
+const launchGameButton = document.querySelector<HTMLButtonElement>('#launch-game')
+const autoLaunchCheck = document.querySelector<HTMLInputElement>('#auto-launch-check')
+const autoCloseCheck = document.querySelector<HTMLInputElement>('#auto-close-check')
+const logBox = document.querySelector<HTMLDivElement>('#activity-log')
 
-if (!detectButton || !pathsList || !manualInput || !saveButton || !configStatus || !refreshBackupsButton || !backupsList) {
+if (!detectButton || !pathsList || !manualInput || !saveButton || !configStatus || !refreshBackupsButton || !backupsList || !launchGameButton || !autoLaunchCheck || !autoCloseCheck || !logBox) {
   throw new Error('UI elements not found')
+}
+
+/**
+ * Appends a message to the activity log with a timestamp.
+ */
+function logActivity(message: string): void {
+  const entry = document.createElement('div')
+  entry.className = 'log-entry'
+  
+  const time = document.createElement('span')
+  time.className = 'time'
+  time.textContent = new Date().toLocaleTimeString()
+  
+  entry.appendChild(time)
+  entry.appendChild(document.createTextNode(message))
+  
+  logBox!.appendChild(entry)
+  logBox!.scrollTop = logBox!.scrollHeight
 }
 
 /**
@@ -145,11 +192,8 @@ function renderBackups(backups: BackupInfo[]): void {
     const row = document.createElement('tr')
     
     const fileCell = document.createElement('td')
-    // Display original filename for clarity, or full backup name if needed. 
-    // Backup name has timestamp, so maybe just show "SaveGame" and let Date column handle time?
-    // Actually, showing the filename helps confirm which file it is if watching a dir.
     fileCell.textContent = backup.original_filename
-    fileCell.title = backup.filename // tooltip shows actual backup file
+    fileCell.title = backup.filename
     
     const dateCell = document.createElement('td')
     dateCell.textContent = formatDate(backup.modified)
@@ -181,8 +225,10 @@ async function loadBackups(): Promise<void> {
   try {
     const backups = await invoke<BackupInfo[]>('get_backups_command')
     renderBackups(backups)
+    logActivity(`Loaded ${backups.length} backups.`)
   } catch (error) {
     console.error('Failed to load backups:', error)
+    logActivity(`Failed to load backups: ${error}`)
     backupsList!.innerHTML = '<tr><td colspan="3" class="error">Failed to load backups</td></tr>'
   } finally {
     refreshBackupsButton!.textContent = 'Refresh Backups'
@@ -214,11 +260,46 @@ async function restoreBackup(backup: BackupInfo): Promise<void> {
       backup_path: backup.path,
       target_path: backup.original_path
     })
+    logActivity(`Restored backup: ${backup.filename}`)
     alert('Restore successful!')
-    // Optionally refresh backups (though they shouldn't change from a restore)
   } catch (error) {
     console.error('Restore failed:', error)
+    logActivity(`Restore failed: ${error}`)
     alert(`Restore failed: ${error}`)
+  }
+}
+
+/**
+ * Saves game settings (auto launch/close).
+ */
+async function saveGameSettings(): Promise<void> {
+  const autoLaunch = autoLaunchCheck!.checked
+  const autoClose = autoCloseCheck!.checked
+
+  try {
+    await invoke('set_game_settings', {
+      auto_launch_game: autoLaunch,
+      auto_close: autoClose
+    })
+    logActivity(`Updated game settings: Auto-Launch=${autoLaunch}, Auto-Close=${autoClose}`)
+  } catch (error) {
+    console.error('Failed to save game settings:', error)
+    logActivity(`Failed to save game settings: ${error}`)
+  }
+}
+
+/**
+ * Launches the game.
+ */
+async function launchGame(): Promise<void> {
+  try {
+    logActivity('Launching game...')
+    await invoke('launch_game')
+    logActivity('Game launch command sent.')
+  } catch (error) {
+    console.error('Failed to launch game:', error)
+    logActivity(`Failed to launch game: ${error}`)
+    alert(`Failed to launch game: ${error}`)
   }
 }
 
@@ -231,13 +312,20 @@ async function loadConfig(): Promise<void> {
     if (config.save_path) {
       manualInput!.value = config.save_path
       setConfigStatus('Configuration loaded.', 'info')
-      void loadBackups() // Load backups if config exists
+      void loadBackups()
     } else {
       setConfigStatus('No save path configured.', 'info')
     }
+    
+    // Set checkboxes
+    autoLaunchCheck!.checked = config.auto_launch_game
+    autoCloseCheck!.checked = config.auto_close
+    
+    logActivity('Configuration loaded.')
   } catch (error) {
     console.error('Failed to load config:', error)
     setConfigStatus('Failed to load configuration.', 'error')
+    logActivity('Failed to load configuration.')
   }
 }
 
@@ -259,15 +347,18 @@ async function savePath(): Promise<void> {
     const isValid = await invoke<boolean>('validate_path', { path })
     if (!isValid) {
       setConfigStatus('Path does not exist or is invalid.', 'error')
+      logActivity(`Invalid path entered: ${path}`)
       return
     }
 
     await invoke('set_save_path', { path })
     setConfigStatus('Save path updated successfully.', 'success')
-    void loadBackups() // Refresh backups after update
+    logActivity(`Save path updated: ${path}`)
+    void loadBackups()
   } catch (error) {
     console.error('Failed to save path:', error)
     setConfigStatus('Error saving path.', 'error')
+    logActivity(`Error saving path: ${error}`)
   } finally {
     saveButton!.disabled = false
   }
@@ -279,20 +370,24 @@ async function savePath(): Promise<void> {
 async function detectSteamSavePaths(): Promise<void> {
   detectButton!.disabled = true
   detectButton!.textContent = 'Scanning...'
+  logActivity('Scanning for save paths...')
 
   try {
     const paths = await invoke<string[]>('detect_steam_save_paths')
     renderPaths(paths)
     if (paths.length > 0) {
-      // Optional: auto-fill if empty
+      logActivity(`Detected ${paths.length} potential paths.`)
       if (!manualInput!.value) {
         manualInput!.value = paths[0]
         setConfigStatus('Path detected. Click "Set Path" to save.', 'info')
       }
+    } else {
+      logActivity('No paths detected.')
     }
   } catch (error) {
     console.error(error)
     pathsList!.innerHTML = '<li class="error">Detection failed</li>'
+    logActivity(`Detection failed: ${error}`)
   } finally {
     detectButton!.disabled = false
     detectButton!.textContent = 'Auto Detect Steam Paths'
@@ -310,6 +405,18 @@ saveButton!.addEventListener('click', () => {
 
 refreshBackupsButton!.addEventListener('click', () => {
   void loadBackups()
+})
+
+launchGameButton!.addEventListener('click', () => {
+  void launchGame()
+})
+
+autoLaunchCheck!.addEventListener('change', () => {
+  void saveGameSettings()
+})
+
+autoCloseCheck!.addEventListener('change', () => {
+  void saveGameSettings()
 })
 
 // Initial load

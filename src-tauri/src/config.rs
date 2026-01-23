@@ -10,6 +10,12 @@ use tauri::State;
 pub struct AppConfig {
     /// The user-configured path to the game's save directory or file.
     pub save_path: Option<String>,
+    /// Whether to automatically launch the game when the app starts.
+    #[serde(default)]
+    pub auto_launch_game: bool,
+    /// Whether to automatically close the app when the game exits.
+    #[serde(default)]
+    pub auto_close: bool,
 }
 
 /// State wrapper for the application configuration.
@@ -84,8 +90,50 @@ pub fn set_save_path(
 
     config.save_path = Some(path.clone());
 
+    save_config(&config)?;
+
+    // Update Watcher
+    // This is done after saving config
+    let path_buf = PathBuf::from(path);
+    if let Err(e) = watcher.start(path_buf) {
+        log::error!("Failed to start watcher: {}", e);
+        return Err(format!(
+            "Configuration saved, but failed to start watcher: {}",
+            e
+        ));
+    }
+
+    Ok(())
+}
+
+/// Sets the game launch and auto-close settings.
+#[tauri::command]
+pub fn set_game_settings(
+    config_state: State<ConfigState>,
+    auto_launch_game: bool,
+    auto_close: bool,
+) -> Result<(), String> {
+    log::info!(
+        "Setting game settings: auto_launch={}, auto_close={}",
+        auto_launch_game,
+        auto_close
+    );
+
+    let mut config = config_state.0.lock().map_err(|e| {
+        log::error!("Failed to acquire lock on configuration state: {}", e);
+        "Failed to acquire lock on configuration state".to_string()
+    })?;
+
+    config.auto_launch_game = auto_launch_game;
+    config.auto_close = auto_close;
+
+    save_config(&config)
+}
+
+/// Serializes and writes the configuration to disk.
+fn save_config(config: &AppConfig) -> Result<(), String> {
     let config_path = get_config_path();
-    let json = serde_json::to_string_pretty(&*config).map_err(|e| {
+    let json = serde_json::to_string_pretty(config).map_err(|e| {
         log::error!("Failed to serialize config: {}", e);
         format!("Failed to serialize config: {}", e)
     })?;
@@ -96,18 +144,6 @@ pub fn set_save_path(
     })?;
 
     log::info!("Configuration saved successfully to {:?}", config_path);
-
-    // Update Watcher
-    // We do this after saving config
-    let path_buf = PathBuf::from(path);
-    if let Err(e) = watcher.start(path_buf) {
-        log::error!("Failed to start watcher: {}", e);
-        return Err(format!(
-            "Configuration saved, but failed to start watcher: {}",
-            e
-        ));
-    }
-
     Ok(())
 }
 
@@ -130,9 +166,24 @@ mod tests {
     fn test_app_config_serialization() {
         let config = AppConfig {
             save_path: Some("C:\\Test".to_string()),
+            auto_launch_game: true,
+            auto_close: true,
         };
         let json = serde_json::to_string(&config).unwrap();
-        assert_eq!(json, r#"{"save_path":"C:\\Test"}"#);
+        // Field order depends on struct definition or serde implementation.
+        // Check if it contains the fields.
+        assert!(json.contains(r#""save_path":"C:\\Test""#));
+        assert!(json.contains(r#""auto_launch_game":true"#));
+        assert!(json.contains(r#""auto_close":true"#));
+    }
+
+    /// Tests that the default configuration has expected values.
+    #[test]
+    fn test_app_config_default() {
+        let config = AppConfig::default();
+        assert!(config.save_path.is_none());
+        assert!(!config.auto_launch_game);
+        assert!(!config.auto_close);
     }
 
     /// Tests that an invalid path string returns false.
@@ -166,12 +217,16 @@ mod tests {
         let config_path = temp_dir.path().join("config.json");
         let config = AppConfig {
             save_path: Some("TestPath".to_string()),
+            auto_launch_game: true,
+            auto_close: false,
         };
         let json = serde_json::to_string(&config).unwrap();
         fs::write(&config_path, json).expect("failed to write config");
 
         let loaded = load_config_from_path(&config_path);
         assert_eq!(loaded.save_path, Some("TestPath".to_string()));
+        assert!(loaded.auto_launch_game);
+        assert!(!loaded.auto_close);
     }
 
     /// Tests loading configuration from a missing file returns default.
@@ -182,5 +237,7 @@ mod tests {
 
         let loaded = load_config_from_path(&config_path);
         assert!(loaded.save_path.is_none());
+        assert!(!loaded.auto_launch_game);
+        assert!(!loaded.auto_close);
     }
 }
