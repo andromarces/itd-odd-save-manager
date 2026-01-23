@@ -149,10 +149,10 @@ mod tests {
     #[test]
     fn test_is_steam_cloud_path() {
         let cloud_path =
-            PathBuf::from("C:\\Program Files (x86)\\Steam\\userdata\\12345\\2239710\\remote");
-        let local_path = PathBuf::from("C:\\Games\\IntoTheDead\\Saves");
-        let partial_path = PathBuf::from("C:\\Steam\\userdata\\12345\\999999\\remote");
-        let mixed_case_path = PathBuf::from("C:\\Steam\\UserDATA\\12345\\2239710\\remote");
+            PathBuf::from("C:/Program Files (x86)/Steam/userdata/12345/2239710/remote");
+        let local_path = PathBuf::from("C:/Games/IntoTheDead/Saves");
+        let partial_path = PathBuf::from("C:/Steam/userdata/12345/999999/remote");
+        let mixed_case_path = PathBuf::from("C:/Steam/UserDATA/12345/2239710/remote");
 
         assert!(is_steam_cloud_path(&cloud_path));
         assert!(!is_steam_cloud_path(&local_path));

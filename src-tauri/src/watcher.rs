@@ -261,7 +261,7 @@ mod tests {
         let check = |p: &str| -> bool {
             PathBuf::from(p)
                 .extension()
-                .map_or(false, |ext| ext.to_string_lossy().to_lowercase() == "sav")
+                .is_some_and(|ext| ext.to_string_lossy().to_lowercase() == "sav")
         };
 
         assert!(check("save.sav"));
