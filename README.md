@@ -42,3 +42,16 @@ Portable auto‑save backup app for _Into the Dead: Our Darkest Days_. The initi
 ## License
 
 See `LICENSE.md`.
+
+## Development
+
+### Prerequisites
+
+- Rust (latest stable)
+- Node.js & npm
+
+### Setup
+
+1. Clone the repository.
+2. Run `npm install` to install dependencies and configure git hooks.
+   - This project uses a `pre-commit` hook to enforce Rust formatting.
