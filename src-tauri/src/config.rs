@@ -70,6 +70,25 @@ pub fn get_config(state: State<ConfigState>) -> Result<AppConfig, String> {
     })
 }
 
+/// Helper to safely update configuration: locks, clones, mutates, saves to disk, then updates memory.
+fn update_config<F>(config_state: &State<ConfigState>, mutator: F) -> Result<(), String>
+where
+    F: FnOnce(&mut AppConfig),
+{
+    let mut config_guard = config_state.0.lock().map_err(|e| {
+        log::error!("Failed to acquire lock on configuration state: {}", e);
+        "Failed to acquire lock on configuration state".to_string()
+    })?;
+
+    let mut new_config = config_guard.clone();
+    mutator(&mut new_config);
+
+    save_config(&new_config)?;
+
+    *config_guard = new_config;
+    Ok(())
+}
+
 /// Sets the save path in the configuration, persists it, and updates the watcher.
 #[tauri::command]
 pub fn set_save_path(
@@ -84,20 +103,9 @@ pub fn set_save_path(
         return Err("The provided path does not exist.".to_string());
     }
 
-    // Update Config with state consistency check
-    // We lock, clone, modify, save, and THEN update the lock only if save succeeds.
-    let mut config_guard = config_state.0.lock().map_err(|e| {
-        log::error!("Failed to acquire lock on configuration state: {}", e);
-        "Failed to acquire lock on configuration state".to_string()
+    update_config(&config_state, |config| {
+        config.save_path = Some(path.clone());
     })?;
-
-    let mut new_config = config_guard.clone();
-    new_config.save_path = Some(path.clone());
-
-    save_config(&new_config)?;
-
-    // Save succeeded, update in-memory state
-    *config_guard = new_config;
 
     // Update Watcher
     // This is done after saving config
@@ -126,20 +134,10 @@ pub fn set_game_settings(
         auto_close
     );
 
-    let mut config_guard = config_state.0.lock().map_err(|e| {
-        log::error!("Failed to acquire lock on configuration state: {}", e);
-        "Failed to acquire lock on configuration state".to_string()
-    })?;
-
-    let mut new_config = config_guard.clone();
-    new_config.auto_launch_game = auto_launch_game;
-    new_config.auto_close = auto_close;
-
-    save_config(&new_config)?;
-
-    *config_guard = new_config;
-
-    Ok(())
+    update_config(&config_state, |config| {
+        config.auto_launch_game = auto_launch_game;
+        config.auto_close = auto_close;
+    })
 }
 
 /// Serializes and writes the configuration to disk.

@@ -90,25 +90,21 @@ pub fn prune_backups(backup_dir: &Path, retention_count: usize) -> Result<usize,
         .map_err(|e| e.to_string())?
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.path().is_file())
+        .map(|entry| {
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            (entry, modified)
+        })
         .collect::<Vec<_>>();
 
     // Sort by modification time, newest first
-    entries.sort_by(|a, b| {
-        let meta_a = a
-            .metadata()
-            .map(|m| m.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH))
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        let meta_b = b
-            .metadata()
-            .map(|m| m.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH))
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        // Reverse order (newest first)
-        meta_b.cmp(&meta_a)
-    });
+    entries.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mut deleted_count = 0;
     if entries.len() > retention_count {
-        for entry in entries.iter().skip(retention_count) {
+        for (entry, _) in entries.iter().skip(retention_count) {
             if fs::remove_file(entry.path()).is_ok() {
                 deleted_count += 1;
             }
@@ -168,7 +164,16 @@ pub fn get_backups(config_path: &Path) -> Result<Vec<BackupInfo>, String> {
         return Ok(Vec::new());
     }
 
-    let mut backups = Vec::new();
+    struct RawBackupEntry {
+        path: PathBuf,
+        filename: String,
+        original_filename: String,
+        original_path: String,
+        size: u64,
+        modified: DateTime<Local>,
+    }
+
+    let mut raw_backups = Vec::new();
     let entries = fs::read_dir(&backup_dir).map_err(|e| e.to_string())?;
 
     for entry in entries {
@@ -196,19 +201,32 @@ pub fn get_backups(config_path: &Path) -> Result<Vec<BackupInfo>, String> {
                 config_path.join(&original_filename)
             };
 
-            backups.push(BackupInfo {
-                path: path.to_string_lossy().into_owned(),
+            raw_backups.push(RawBackupEntry {
+                path,
                 filename,
                 original_filename,
                 original_path: original_path.to_string_lossy().into_owned(),
                 size: metadata.len(),
-                modified: modified.to_rfc3339(),
+                modified,
             });
         }
     }
 
-    // Sort by modified desc
-    backups.sort_by(|a, b| b.modified.cmp(&a.modified));
+    // Sort by modified desc using the DateTime object
+    raw_backups.sort_by(|a, b| b.modified.cmp(&a.modified));
+
+    // Convert to BackupInfo
+    let backups = raw_backups
+        .into_iter()
+        .map(|entry| BackupInfo {
+            path: entry.path.to_string_lossy().into_owned(),
+            filename: entry.filename,
+            original_filename: entry.original_filename,
+            original_path: entry.original_path,
+            size: entry.size,
+            modified: entry.modified.to_rfc3339(),
+        })
+        .collect();
 
     Ok(backups)
 }

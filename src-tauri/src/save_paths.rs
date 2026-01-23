@@ -26,14 +26,10 @@ pub(crate) fn candidate_steam_roots() -> Vec<PathBuf> {
         push_if_dir(&mut roots, PathBuf::from(program_files).join("Steam"));
     }
 
-    let mut unique = Vec::new();
-    for root in roots {
-        if !unique.iter().any(|item: &PathBuf| item == &root) {
-            unique.push(root);
-        }
-    }
+    roots.sort();
+    roots.dedup();
 
-    unique
+    roots
 }
 
 /// Finds save directories for the game under the given Steam install root.

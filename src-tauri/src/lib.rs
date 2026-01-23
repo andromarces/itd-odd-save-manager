@@ -40,6 +40,14 @@ fn restore_backup_command(backup_path: String, target_path: String) -> Result<()
     backup::restore_backup(&backup, &target)
 }
 
+/// Helper to show and focus the main window.
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 /// Runs the Tauri application entry point.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -89,10 +97,7 @@ pub fn run() {
                                 app.exit(0);
                             }
                             "open" => {
-                                if let Some(window) = app.get_webview_window("main") {
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
-                                }
+                                show_main_window(app);
                             }
                             "launch" => {
                                 let _ = game_manager::launch_game(app.clone());
@@ -102,11 +107,7 @@ pub fn run() {
                     })
                     .on_tray_icon_event(|tray, event: tauri::tray::TrayIconEvent| {
                         if let tauri::tray::TrayIconEvent::Click { .. } = event {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                            show_main_window(tray.app_handle());
                         }
                     })
                     .icon(icon)

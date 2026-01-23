@@ -1,27 +1,35 @@
 // ITD ODD Save Manager by andromarces
 
-import { invoke } from '@tauri-apps/api/core'
-import './style.css'
+import { invoke } from '@tauri-apps/api/core';
+import './style.css';
 
 interface AppConfig {
-  save_path: string | null
-  auto_launch_game: boolean
-  auto_close: boolean
+  save_path: string | null;
+  auto_launch_game: boolean;
+  auto_close: boolean;
 }
 
 interface BackupInfo {
-  path: string
-  filename: string
-  original_filename: string
-  original_path: string
-  size: number
-  modified: string
+  path: string;
+  filename: string;
+  original_filename: string;
+  original_path: string;
+  size: number;
+  modified: string;
 }
 
-const app = document.querySelector<HTMLDivElement>('#app')
-if (!app) {
-  throw new Error('App container not found')
+/**
+ * Helper to safely query DOM elements. Throws if not found.
+ */
+function getElement<T extends HTMLElement>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) {
+    throw new Error(`Element not found: ${selector}`);
+  }
+  return element;
 }
+
+const app = getElement<HTMLDivElement>('#app');
 
 app.innerHTML = `
   <main class="layout">
@@ -93,51 +101,61 @@ app.innerHTML = `
       <ul id="paths" class="paths" aria-live="polite"></ul>
     </section>
   </main>
-`
+`;
 
 // Elements
-const detectButton = document.querySelector<HTMLButtonElement>('#detect')
-const pathsList = document.querySelector<HTMLUListElement>('#paths')
-const manualInput = document.querySelector<HTMLInputElement>('#manual-path')
-const saveButton = document.querySelector<HTMLButtonElement>('#save-config')
-const configStatus = document.querySelector<HTMLParagraphElement>('#config-status')
-const refreshBackupsButton = document.querySelector<HTMLButtonElement>('#refresh-backups')
-const backupsList = document.querySelector<HTMLTableSectionElement>('#backups-list')
-const launchGameButton = document.querySelector<HTMLButtonElement>('#launch-game')
-const autoLaunchCheck = document.querySelector<HTMLInputElement>('#auto-launch-check')
-const autoCloseCheck = document.querySelector<HTMLInputElement>('#auto-close-check')
-const logBox = document.querySelector<HTMLDivElement>('#activity-log')
+const detectButton = getElement<HTMLButtonElement>('#detect');
+const pathsList = getElement<HTMLUListElement>('#paths');
+const manualInput = getElement<HTMLInputElement>('#manual-path');
+const saveButton = getElement<HTMLButtonElement>('#save-config');
+const configStatus = getElement<HTMLParagraphElement>('#config-status');
+const refreshBackupsButton = getElement<HTMLButtonElement>('#refresh-backups');
+const backupsList = getElement<HTMLTableSectionElement>('#backups-list');
+const launchGameButton = getElement<HTMLButtonElement>('#launch-game');
+const autoLaunchCheck = getElement<HTMLInputElement>('#auto-launch-check');
+const autoCloseCheck = getElement<HTMLInputElement>('#auto-close-check');
+const logBox = getElement<HTMLDivElement>('#activity-log');
 
-if (!detectButton || !pathsList || !manualInput || !saveButton || !configStatus || !refreshBackupsButton || !backupsList || !launchGameButton || !autoLaunchCheck || !autoCloseCheck || !logBox) {
-  throw new Error('UI elements not found')
-}
+const MAX_LOG_ENTRIES = 100;
+
+// State
+let currentBackups: BackupInfo[] = [];
 
 /**
  * Appends a message to the activity log with a timestamp.
  */
 function logActivity(message: string): void {
-  const entry = document.createElement('div')
-  entry.className = 'log-entry'
-  
-  const time = document.createElement('span')
-  time.className = 'time'
-  time.textContent = new Date().toLocaleTimeString()
-  
-  entry.appendChild(time)
-  entry.appendChild(document.createTextNode(message))
-  
-  logBox!.appendChild(entry)
-  logBox!.scrollTop = logBox!.scrollHeight
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+
+  const time = document.createElement('span');
+  time.className = 'time';
+  time.textContent = new Date().toLocaleTimeString();
+
+  entry.appendChild(time);
+  entry.appendChild(document.createTextNode(message));
+
+  logBox.appendChild(entry);
+
+  // Cap the log size
+  while (logBox.childElementCount > MAX_LOG_ENTRIES) {
+    logBox.firstElementChild?.remove();
+  }
+
+  logBox.scrollTop = logBox.scrollHeight;
 }
 
 /**
  * Updates the configuration status message.
  */
-function setConfigStatus(message: string, type: 'info' | 'success' | 'error' = 'info'): void {
-  configStatus!.textContent = message
-  configStatus!.className = 'status-text'
+function setConfigStatus(
+  message: string,
+  type: 'info' | 'success' | 'error' = 'info',
+): void {
+  configStatus.textContent = message;
+  configStatus.className = 'status-text';
   if (type !== 'info') {
-    configStatus!.classList.add(type)
+    configStatus.classList.add(type);
   }
 }
 
@@ -145,32 +163,21 @@ function setConfigStatus(message: string, type: 'info' | 'success' | 'error' = '
  * Renders the detected save paths into the list element.
  */
 function renderPaths(paths: string[]): void {
-  pathsList!.innerHTML = ''
+  pathsList.innerHTML = '';
 
   if (paths.length === 0) {
-    const item = document.createElement('li')
-    item.textContent = 'No Steam save paths detected.'
-    item.classList.add('empty')
-    pathsList!.appendChild(item)
-    return
+    const item = document.createElement('li');
+    item.textContent = 'No Steam save paths detected.';
+    item.classList.add('empty');
+    pathsList.appendChild(item);
+    return;
   }
 
   for (const path of paths) {
-    const item = document.createElement('li')
-    item.textContent = path
-    item.title = 'Click to use this path'
-
-    /**
-     * Handler to select the clicked path.
-     * Updates the manual input field and status message.
-     */
-    const onPathClick = (): void => {
-      manualInput!.value = path
-      setConfigStatus('Path selected from list. Click "Set Path" to save.', 'info')
-    }
-
-    item.addEventListener('click', onPathClick)
-    pathsList!.appendChild(item)
+    const item = document.createElement('li');
+    item.textContent = path;
+    item.title = 'Click to use this path';
+    pathsList.appendChild(item);
   }
 }
 
@@ -179,10 +186,10 @@ function renderPaths(paths: string[]): void {
  */
 function formatDate(isoString: string): string {
   try {
-    const date = new Date(isoString)
-    return date.toLocaleString()
+    const date = new Date(isoString);
+    return date.toLocaleString();
   } catch {
-    return isoString
+    return isoString;
   }
 }
 
@@ -190,43 +197,92 @@ function formatDate(isoString: string): string {
  * Renders the list of backups.
  */
 function renderBackups(backups: BackupInfo[]): void {
-  backupsList!.innerHTML = ''
+  backupsList.innerHTML = '';
 
   if (backups.length === 0) {
-    backupsList!.innerHTML = '<tr><td colspan="3" class="empty">No backups found.</td></tr>'
-    return
+    backupsList.innerHTML =
+      '<tr><td colspan="3" class="empty">No backups found.</td></tr>';
+    return;
   }
 
-  for (const backup of backups) {
-    const row = document.createElement('tr')
-    
-    const fileCell = document.createElement('td')
-    fileCell.textContent = backup.original_filename
-    fileCell.title = backup.filename
-    
-    const dateCell = document.createElement('td')
-    dateCell.textContent = formatDate(backup.modified)
-    
-    const actionCell = document.createElement('td')
-    const restoreBtn = document.createElement('button')
-    restoreBtn.textContent = 'Restore'
-    restoreBtn.className = 'small'
+  backups.forEach((backup, index) => {
+    const row = document.createElement('tr');
 
-    /**
-     * Handler to trigger the restore process for this backup.
-     */
-    const onRestoreClick = (): void => {
-      void restoreBackup(backup)
+    const fileCell = document.createElement('td');
+    fileCell.textContent = backup.original_filename;
+    fileCell.title = backup.filename;
+
+    const dateCell = document.createElement('td');
+    dateCell.textContent = formatDate(backup.modified);
+
+    const actionCell = document.createElement('td');
+    const restoreBtn = document.createElement('button');
+    restoreBtn.textContent = 'Restore';
+    restoreBtn.className = 'small';
+    restoreBtn.dataset.index = index.toString();
+
+    actionCell.appendChild(restoreBtn);
+
+    row.appendChild(fileCell);
+    row.appendChild(dateCell);
+    row.appendChild(actionCell);
+
+    backupsList.appendChild(row);
+  });
+}
+
+/**
+ * Helper to safely invoke Tauri commands with standardized logging and error handling.
+ */
+async function safeInvoke<T>(
+  command: string,
+  args?: Record<string, unknown>,
+  options: {
+    actionName?: string;
+    successLog?: string;
+    successAlert?: string;
+    alertOnError?: boolean;
+    onError?: (error: unknown) => void;
+  } = {},
+): Promise<T | undefined> {
+  const action = options.actionName || command;
+  try {
+    const data = await invoke<T>(command, args);
+
+    if (options.successLog) {
+      logActivity(options.successLog);
     }
 
-    restoreBtn.addEventListener('click', onRestoreClick)
-    actionCell.appendChild(restoreBtn)
+    if (options.successAlert) {
+      alert(options.successAlert);
+    }
 
-    row.appendChild(fileCell)
-    row.appendChild(dateCell)
-    row.appendChild(actionCell)
-    
-    backupsList!.appendChild(row)
+    return data;
+  } catch (error) {
+    const msg = `Failed to ${action}`;
+    let errorStr = String(error);
+    if (error instanceof Error) {
+      errorStr = error.message;
+    } else if (typeof error === 'object' && error !== null) {
+      try {
+        errorStr = JSON.stringify(error);
+      } catch {
+        // Fallback to default String conversion if stringify fails
+      }
+    }
+
+    console.error(`${msg}:`, error);
+    logActivity(`${msg}: ${errorStr}`);
+
+    if (options.alertOnError) {
+      alert(`${msg}: ${errorStr}`);
+    }
+
+    if (options.onError) {
+      options.onError(error);
+    }
+
+    return undefined;
   }
 }
 
@@ -234,115 +290,125 @@ function renderBackups(backups: BackupInfo[]): void {
  * Loads backups from the backend.
  */
 async function loadBackups(): Promise<void> {
-  if (!manualInput!.value) return
+  if (!manualInput.value) return;
 
-  refreshBackupsButton!.textContent = 'Refreshing...'
-  refreshBackupsButton!.disabled = true
+  refreshBackupsButton.textContent = 'Refreshing...';
+  refreshBackupsButton.disabled = true;
 
-  try {
-    const backups = await invoke<BackupInfo[]>('get_backups_command')
-    renderBackups(backups)
-    logActivity(`Loaded ${backups.length} backups.`)
-  } catch (error) {
-    console.error('Failed to load backups:', error)
-    logActivity(`Failed to load backups: ${error}`)
-    backupsList!.innerHTML = '<tr><td colspan="3" class="error">Failed to load backups</td></tr>'
-  } finally {
-    refreshBackupsButton!.textContent = 'Refresh Backups'
-    refreshBackupsButton!.disabled = false
+  const backups = await safeInvoke<BackupInfo[]>(
+    'get_backups_command',
+    undefined,
+    {
+      actionName: 'load backups',
+      onError: () => {
+        backupsList.innerHTML =
+          '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
+      },
+    },
+  );
+
+  if (backups) {
+    currentBackups = backups;
+    renderBackups(backups);
+    logActivity(`Loaded ${backups.length} backups.`);
   }
+
+  refreshBackupsButton.textContent = 'Refresh Backups';
+  refreshBackupsButton.disabled = false;
 }
 
 /**
  * Restores a backup.
  */
 async function restoreBackup(backup: BackupInfo): Promise<void> {
-  let message = `Are you sure you want to restore "${backup.original_filename}" from ${formatDate(backup.modified)}?`
-  message += `\nThis will overwrite the current save file.`
+  let message = `Are you sure you want to restore "${backup.original_filename}" from ${formatDate(backup.modified)}?`;
+  message += `\nThis will overwrite the current save file.`;
 
-  try {
-    const isCloud = await invoke<boolean>('check_steam_cloud_path', { path: backup.original_path })
-    if (isCloud) {
-      message += `\n\nWARNING: Steam Cloud folder detected.\nSteam may overwrite this restore with its cloud copy unless you launch in Offline Mode or disable Steam Cloud.`
-    }
-  } catch (error) {
-    console.warn('Failed to check Steam Cloud status:', error)
+  const isCloud = await safeInvoke<boolean>(
+    'check_steam_cloud_path',
+    { path: backup.original_path },
+    {
+      actionName: 'check Steam Cloud status',
+    },
+  );
+
+  if (isCloud) {
+    message += `\n\nWARNING: Steam Cloud folder detected.\nSteam may overwrite this restore with its cloud copy unless you launch in Offline Mode or disable Steam Cloud.`;
   }
 
-  const confirmed = window.confirm(message)
-  if (!confirmed) return
+  const confirmed = window.confirm(message);
+  if (!confirmed) return;
 
-  try {
-    await invoke('restore_backup_command', {
+  await safeInvoke(
+    'restore_backup_command',
+    {
       backup_path: backup.path,
-      target_path: backup.original_path
-    })
-    logActivity(`Restored backup: ${backup.filename}`)
-    alert('Restore successful!')
-  } catch (error) {
-    console.error('Restore failed:', error)
-    logActivity(`Restore failed: ${error}`)
-    alert(`Restore failed: ${error}`)
-  }
+      target_path: backup.original_path,
+    },
+    {
+      actionName: 'restore backup',
+      successLog: `Restored backup: ${backup.filename}`,
+      successAlert: 'Restore successful!',
+      alertOnError: true,
+    },
+  );
 }
 
 /**
  * Saves game settings (auto launch/close).
  */
 async function saveGameSettings(): Promise<void> {
-  const autoLaunch = autoLaunchCheck!.checked
-  const autoClose = autoCloseCheck!.checked
+  const autoLaunch = autoLaunchCheck.checked;
+  const autoClose = autoCloseCheck.checked;
 
-  try {
-    await invoke('set_game_settings', {
+  await safeInvoke(
+    'set_game_settings',
+    {
       auto_launch_game: autoLaunch,
-      auto_close: autoClose
-    })
-    logActivity(`Updated game settings: Auto-Launch=${autoLaunch}, Auto-Close=${autoClose}`)
-  } catch (error) {
-    console.error('Failed to save game settings:', error)
-    logActivity(`Failed to save game settings: ${error}`)
-  }
+      auto_close: autoClose,
+    },
+    {
+      actionName: 'save game settings',
+      successLog: `Updated game settings: Auto-Launch=${autoLaunch}, Auto-Close=${autoClose}`,
+    },
+  );
 }
 
 /**
  * Launches the game.
  */
 async function launchGame(): Promise<void> {
-  try {
-    logActivity('Launching game...')
-    await invoke('launch_game')
-    logActivity('Game launch command sent.')
-  } catch (error) {
-    console.error('Failed to launch game:', error)
-    logActivity(`Failed to launch game: ${error}`)
-    alert(`Failed to launch game: ${error}`)
-  }
+  logActivity('Launching game...');
+  await safeInvoke('launch_game', undefined, {
+    actionName: 'launch game',
+    successLog: 'Game launch command sent.',
+    alertOnError: true,
+  });
 }
 
 /**
  * Loads the current configuration from the backend.
  */
 async function loadConfig(): Promise<void> {
-  try {
-    const config = await invoke<AppConfig>('get_config')
+  const config = await safeInvoke<AppConfig>('get_config', undefined, {
+    actionName: 'load config',
+    onError: () => setConfigStatus('Failed to load configuration.', 'error'),
+  });
+
+  if (config) {
     if (config.save_path) {
-      manualInput!.value = config.save_path
-      setConfigStatus('Configuration loaded.', 'info')
-      void loadBackups()
+      manualInput.value = config.save_path;
+      setConfigStatus('Configuration loaded.', 'info');
+      void loadBackups();
     } else {
-      setConfigStatus('No save path configured.', 'info')
+      setConfigStatus('No save path configured.', 'info');
     }
-    
+
     // Set checkboxes
-    autoLaunchCheck!.checked = config.auto_launch_game
-    autoCloseCheck!.checked = config.auto_close
-    
-    logActivity('Configuration loaded.')
-  } catch (error) {
-    console.error('Failed to load config:', error)
-    setConfigStatus('Failed to load configuration.', 'error')
-    logActivity('Failed to load configuration.')
+    autoLaunchCheck.checked = config.auto_launch_game;
+    autoCloseCheck.checked = config.auto_close;
+
+    logActivity('Configuration loaded.');
   }
 }
 
@@ -350,34 +416,50 @@ async function loadConfig(): Promise<void> {
  * Validates and saves the user-provided path.
  */
 async function savePath(): Promise<void> {
-  const path = manualInput!.value.trim()
-  
+  const path = manualInput.value.trim();
+
   if (!path) {
-    setConfigStatus('Please enter a path.', 'error')
-    return
+    setConfigStatus('Please enter a path.', 'error');
+    return;
   }
 
-  setConfigStatus('Validating...', 'info')
-  saveButton!.disabled = true
+  setConfigStatus('Validating...', 'info');
+  saveButton.disabled = true;
 
   try {
-    const isValid = await invoke<boolean>('validate_path', { path })
+    const isValid = await safeInvoke<boolean>(
+      'validate_path',
+      { path },
+      {
+        actionName: 'validate path',
+        onError: () => setConfigStatus('Error validating path.', 'error'),
+      },
+    );
+
+    if (isValid === undefined) return; // Error occurred
+
     if (!isValid) {
-      setConfigStatus('Path does not exist or is invalid.', 'error')
-      logActivity(`Invalid path entered: ${path}`)
-      return
+      setConfigStatus('Path does not exist or is invalid.', 'error');
+      logActivity(`Invalid path entered: ${path}`);
+      return;
     }
 
-    await invoke('set_save_path', { path })
-    setConfigStatus('Save path updated successfully.', 'success')
-    logActivity(`Save path updated: ${path}`)
-    void loadBackups()
-  } catch (error) {
-    console.error('Failed to save path:', error)
-    setConfigStatus('Error saving path.', 'error')
-    logActivity(`Error saving path: ${error}`)
+    const result = await safeInvoke(
+      'set_save_path',
+      { path },
+      {
+        actionName: 'save path',
+        onError: () => setConfigStatus('Error saving path.', 'error'),
+      },
+    );
+
+    if (result !== undefined) {
+      setConfigStatus('Save path updated successfully.', 'success');
+      logActivity(`Save path updated: ${path}`);
+      void loadBackups();
+    }
   } finally {
-    saveButton!.disabled = false
+    saveButton.disabled = false;
   }
 }
 
@@ -385,30 +467,36 @@ async function savePath(): Promise<void> {
  * Calls the backend command to detect Steam save paths.
  */
 async function detectSteamSavePaths(): Promise<void> {
-  detectButton!.disabled = true
-  detectButton!.textContent = 'Scanning...'
-  logActivity('Scanning for save paths...')
+  detectButton.disabled = true;
+  detectButton.textContent = 'Scanning...';
+  logActivity('Scanning for save paths...');
 
-  try {
-    const paths = await invoke<string[]>('detect_steam_save_paths')
-    renderPaths(paths)
+  const paths = await safeInvoke<string[]>(
+    'detect_steam_save_paths',
+    undefined,
+    {
+      actionName: 'detect steam save paths',
+      onError: () => {
+        pathsList.innerHTML = '<li class="error">Detection failed</li>';
+      },
+    },
+  );
+
+  if (paths) {
+    renderPaths(paths);
     if (paths.length > 0) {
-      logActivity(`Detected ${paths.length} potential paths.`)
-      if (!manualInput!.value) {
-        manualInput!.value = paths[0]
-        setConfigStatus('Path detected. Click "Set Path" to save.', 'info')
+      logActivity(`Detected ${paths.length} potential paths.`);
+      if (!manualInput.value) {
+        manualInput.value = paths[0];
+        setConfigStatus('Path detected. Click "Set Path" to save.', 'info');
       }
     } else {
-      logActivity('No paths detected.')
+      logActivity('No paths detected.');
     }
-  } catch (error) {
-    console.error(error)
-    pathsList!.innerHTML = '<li class="error">Detection failed</li>'
-    logActivity(`Detection failed: ${error}`)
-  } finally {
-    detectButton!.disabled = false
-    detectButton!.textContent = 'Auto Detect Steam Paths'
   }
+
+  detectButton.disabled = false;
+  detectButton.textContent = 'Auto Detect Steam Paths';
 }
 
 // Event Listeners
@@ -418,54 +506,92 @@ async function detectSteamSavePaths(): Promise<void> {
  * Triggers the backend detection logic and updates the UI.
  */
 const onDetectClick = (): void => {
-  void detectSteamSavePaths()
-}
-detectButton!.addEventListener('click', onDetectClick)
+  void detectSteamSavePaths();
+};
+detectButton.addEventListener('click', onDetectClick);
 
 /**
  * Handler for the "Set Path" button click.
  * Validates and saves the user-provided save path.
  */
 const onSavePathClick = (): void => {
-  void savePath()
-}
-saveButton!.addEventListener('click', onSavePathClick)
+  void savePath();
+};
+saveButton.addEventListener('click', onSavePathClick);
 
 /**
  * Handler for the "Refresh Backups" button click.
  * Reloads the list of backups from the backend.
  */
 const onRefreshBackupsClick = (): void => {
-  void loadBackups()
-}
-refreshBackupsButton!.addEventListener('click', onRefreshBackupsClick)
+  void loadBackups();
+};
+refreshBackupsButton.addEventListener('click', onRefreshBackupsClick);
 
 /**
  * Handler for the "Launch Game" button click.
  * Sends the launch command to the backend.
  */
 const onLaunchGameClick = (): void => {
-  void launchGame()
-}
-launchGameButton!.addEventListener('click', onLaunchGameClick)
+  void launchGame();
+};
+launchGameButton.addEventListener('click', onLaunchGameClick);
 
 /**
  * Handler for changes to the "Auto-launch game" checkbox.
  * Saves the updated game settings.
  */
 const onAutoLaunchChange = (): void => {
-  void saveGameSettings()
-}
-autoLaunchCheck!.addEventListener('change', onAutoLaunchChange)
+  void saveGameSettings();
+};
+autoLaunchCheck.addEventListener('change', onAutoLaunchChange);
 
 /**
  * Handler for changes to the "Auto-close app" checkbox.
  * Saves the updated game settings.
  */
 const onAutoCloseChange = (): void => {
-  void saveGameSettings()
-}
-autoCloseCheck!.addEventListener('change', onAutoCloseChange)
+  void saveGameSettings();
+};
+autoCloseCheck.addEventListener('change', onAutoCloseChange);
+
+/**
+ * Delegated handler for clicking on detected paths.
+ */
+pathsList.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement;
+  const li = target.closest('li');
+
+  // Ignore clicks if not on an LI or if it's the empty/error message
+  if (!li || li.classList.contains('empty') || li.classList.contains('error'))
+    return;
+
+  const path = li.textContent;
+  if (path) {
+    manualInput.value = path;
+    setConfigStatus(
+      'Path selected from list. Click "Set Path" to save.',
+      'info',
+    );
+  }
+});
+
+/**
+ * Delegated handler for clicking on backup restore buttons.
+ */
+backupsList.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement;
+  const button = target.closest('button');
+
+  if (!button || !button.dataset.index) return;
+
+  const index = parseInt(button.dataset.index, 10);
+  const backup = currentBackups[index];
+
+  if (backup) {
+    void restoreBackup(backup);
+  }
+});
 
 // Initial load
-void loadConfig()
+void loadConfig();

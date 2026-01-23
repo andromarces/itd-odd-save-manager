@@ -51,7 +51,15 @@ impl FileWatcher {
         .map_err(|e| e.to_string())?;
 
         // Determine what to watch
-        let is_watching_file = path.is_file();
+        // We use the same heuristic as get_backups to handle missing files (e.g. before first save)
+        let is_watching_file = if path.exists() {
+            path.is_file()
+        } else {
+            path.extension()
+                .map(|ext| ext.to_string_lossy().eq_ignore_ascii_case("sav"))
+                .unwrap_or(false)
+        };
+
         let watch_target = if is_watching_file {
             path.parent().ok_or("Invalid file path")?.to_path_buf()
         } else {
@@ -103,7 +111,12 @@ fn debounce_loop(
     target_path: PathBuf,
     is_watching_file: bool,
 ) {
-    let mut pending_files: HashSet<PathBuf> = HashSet::new();
+    // Only initialize the HashSet if we are watching a directory
+    let mut pending_files: Option<HashSet<PathBuf>> = if is_watching_file {
+        None
+    } else {
+        Some(HashSet::new())
+    };
     let mut last_change_time = std::time::Instant::now();
     let mut pending_change = false;
 
@@ -113,24 +126,31 @@ fn debounce_loop(
             let elapsed = last_change_time.elapsed();
             if elapsed >= DEBOUNCE_DURATION {
                 // Trigger Backups
-                info!(
-                    "Debounce timeout reached. Backing up {} files.",
-                    pending_files.len()
-                );
+                if is_watching_file {
+                    info!("Debounce timeout reached. Backing up 1 file.");
+                    if let Err(e) = perform_backup(&target_path) {
+                        error!("Backup failed for {:?}: {}", target_path, e);
+                    } else if let Some(parent) = target_path.parent() {
+                        let backup_dir = parent.join(".backups");
+                        let _ = prune_backups(&backup_dir, MAX_BACKUPS);
+                    }
+                } else if let Some(files) = &mut pending_files {
+                    info!(
+                        "Debounce timeout reached. Backing up {} files.",
+                        files.len()
+                    );
 
-                for file_path in &pending_files {
-                    if let Err(e) = perform_backup(file_path) {
-                        error!("Backup failed for {:?}: {}", file_path, e);
-                    } else {
-                        // Prune
-                        if let Some(parent) = file_path.parent() {
+                    for file_path in files.iter() {
+                        if let Err(e) = perform_backup(file_path) {
+                            error!("Backup failed for {:?}: {}", file_path, e);
+                        } else if let Some(parent) = file_path.parent() {
                             let backup_dir = parent.join(".backups");
                             let _ = prune_backups(&backup_dir, MAX_BACKUPS);
                         }
                     }
+                    files.clear();
                 }
 
-                pending_files.clear();
                 pending_change = false;
                 Duration::from_secs(60) // Idle wait
             } else {
@@ -159,15 +179,13 @@ fn debounce_loop(
                     if is_relevant {
                         match event.kind {
                             notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
-                                // If target is a file, we track the target path (canonical)
+                                // If target is a file, we rely on pending_change flag and target_path
                                 // If target is a dir, we track the specific file that changed
-                                let path_to_backup = if is_watching_file {
-                                    target_path.clone()
-                                } else {
-                                    path.clone()
-                                };
-
-                                pending_files.insert(path_to_backup);
+                                if !is_watching_file {
+                                    if let Some(files) = &mut pending_files {
+                                        files.insert(path.clone());
+                                    }
+                                }
                                 pending_change = true;
                                 last_change_time = std::time::Instant::now();
                             }
@@ -271,5 +289,22 @@ mod tests {
         assert!(check("Mixed.SaV"));
         assert!(!check("image.png"));
         assert!(!check("no_ext"));
+    }
+
+    /// Tests that the watcher correctly handles a non-existent file path if it has a .sav extension.
+    /// It should treat it as 'file mode' and watch the parent directory instead of failing.
+    #[test]
+    fn test_file_watcher_missing_file_heuristic() {
+        let watcher = FileWatcher::new();
+        let temp_dir = tempdir().unwrap();
+        // Path to a non-existent file
+        let missing_file_path = temp_dir.path().join("future_save.sav");
+
+        // Should succeed because it detects .sav extension, treats as file mode,
+        // and watches the parent directory (which exists).
+        assert!(watcher.start(missing_file_path).is_ok());
+
+        // Cleanup
+        watcher.stop();
     }
 }
