@@ -5,6 +5,15 @@ interface AppConfig {
   save_path: string | null
 }
 
+interface BackupInfo {
+  path: string
+  filename: string
+  original_filename: string
+  original_path: string
+  size: number
+  modified: string
+}
+
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) {
   throw new Error('App container not found')
@@ -30,6 +39,27 @@ app.innerHTML = `
     </section>
 
     <section class="panel">
+      <h2>Backups</h2>
+      <div class="actions">
+        <button id="refresh-backups" type="button" disabled>Refresh Backups</button>
+      </div>
+      <div class="table-container">
+        <table id="backups-table">
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Date</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="backups-list">
+            <tr><td colspan="3" class="empty">No backups found.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
       <h2>Discovery</h2>
       <div class="actions">
         <button id="detect" type="button">Auto Detect Steam Paths</button>
@@ -44,8 +74,10 @@ const pathsList = document.querySelector<HTMLUListElement>('#paths')
 const manualInput = document.querySelector<HTMLInputElement>('#manual-path')
 const saveButton = document.querySelector<HTMLButtonElement>('#save-config')
 const configStatus = document.querySelector<HTMLParagraphElement>('#config-status')
+const refreshBackupsButton = document.querySelector<HTMLButtonElement>('#refresh-backups')
+const backupsList = document.querySelector<HTMLTableSectionElement>('#backups-list')
 
-if (!detectButton || !pathsList || !manualInput || !saveButton || !configStatus) {
+if (!detectButton || !pathsList || !manualInput || !saveButton || !configStatus || !refreshBackupsButton || !backupsList) {
   throw new Error('UI elements not found')
 }
 
@@ -87,6 +119,98 @@ function renderPaths(paths: string[]): void {
 }
 
 /**
+ * Formats a date string for display.
+ */
+function formatDate(isoString: string): string {
+  try {
+    const date = new Date(isoString)
+    return date.toLocaleString()
+  } catch {
+    return isoString
+  }
+}
+
+/**
+ * Renders the list of backups.
+ */
+function renderBackups(backups: BackupInfo[]): void {
+  backupsList!.innerHTML = ''
+
+  if (backups.length === 0) {
+    backupsList!.innerHTML = '<tr><td colspan="3" class="empty">No backups found.</td></tr>'
+    return
+  }
+
+  for (const backup of backups) {
+    const row = document.createElement('tr')
+    
+    const fileCell = document.createElement('td')
+    // Display original filename for clarity, or full backup name if needed. 
+    // Backup name has timestamp, so maybe just show "SaveGame" and let Date column handle time?
+    // Actually, showing the filename helps confirm which file it is if watching a dir.
+    fileCell.textContent = backup.original_filename
+    fileCell.title = backup.filename // tooltip shows actual backup file
+    
+    const dateCell = document.createElement('td')
+    dateCell.textContent = formatDate(backup.modified)
+    
+    const actionCell = document.createElement('td')
+    const restoreBtn = document.createElement('button')
+    restoreBtn.textContent = 'Restore'
+    restoreBtn.className = 'small'
+    restoreBtn.addEventListener('click', () => restoreBackup(backup))
+    actionCell.appendChild(restoreBtn)
+
+    row.appendChild(fileCell)
+    row.appendChild(dateCell)
+    row.appendChild(actionCell)
+    
+    backupsList!.appendChild(row)
+  }
+}
+
+/**
+ * Loads backups from the backend.
+ */
+async function loadBackups(): Promise<void> {
+  if (!manualInput!.value) return
+
+  refreshBackupsButton!.textContent = 'Refreshing...'
+  refreshBackupsButton!.disabled = true
+
+  try {
+    const backups = await invoke<BackupInfo[]>('get_backups_command')
+    renderBackups(backups)
+  } catch (error) {
+    console.error('Failed to load backups:', error)
+    backupsList!.innerHTML = '<tr><td colspan="3" class="error">Failed to load backups</td></tr>'
+  } finally {
+    refreshBackupsButton!.textContent = 'Refresh Backups'
+    refreshBackupsButton!.disabled = false
+  }
+}
+
+/**
+ * Restores a backup.
+ */
+async function restoreBackup(backup: BackupInfo): Promise<void> {
+  const confirmed = window.confirm(`Are you sure you want to restore "${backup.original_filename}" from ${formatDate(backup.modified)}?\nThis will overwrite the current save file.`)
+  if (!confirmed) return
+
+  try {
+    await invoke('restore_backup_command', {
+      backup_path: backup.path,
+      target_path: backup.original_path
+    })
+    alert('Restore successful!')
+    // Optionally refresh backups (though they shouldn't change from a restore)
+  } catch (error) {
+    console.error('Restore failed:', error)
+    alert(`Restore failed: ${error}`)
+  }
+}
+
+/**
  * Loads the current configuration from the backend.
  */
 async function loadConfig(): Promise<void> {
@@ -95,6 +219,7 @@ async function loadConfig(): Promise<void> {
     if (config.save_path) {
       manualInput!.value = config.save_path
       setConfigStatus('Configuration loaded.', 'info')
+      void loadBackups() // Load backups if config exists
     } else {
       setConfigStatus('No save path configured.', 'info')
     }
@@ -127,6 +252,7 @@ async function savePath(): Promise<void> {
 
     await invoke('set_save_path', { path })
     setConfigStatus('Save path updated successfully.', 'success')
+    void loadBackups() // Refresh backups after update
   } catch (error) {
     console.error('Failed to save path:', error)
     setConfigStatus('Error saving path.', 'error')
@@ -168,6 +294,10 @@ detectButton!.addEventListener('click', () => {
 
 saveButton!.addEventListener('click', () => {
   void savePath()
+})
+
+refreshBackupsButton!.addEventListener('click', () => {
+  void loadBackups()
 })
 
 // Initial load

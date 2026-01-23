@@ -1,6 +1,23 @@
-use chrono::Local;
+use chrono::{DateTime, Local};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+const TIMESTAMP_FORMAT: &str = "%Y-%m-%d_%H-%M-%S_%3f";
+// Length of "YYYY-MM-DD_HH-MM-SS_MS" is 23 chars.
+// Plus the preceding underscore separator is 24 chars.
+const TIMESTAMP_SUFFIX_LEN: usize = 24;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BackupInfo {
+    pub path: String,
+    pub filename: String,
+    pub original_filename: String,
+    pub original_path: String,
+    pub size: u64,
+    pub modified: String, // ISO 8601
+}
 
 /// Copies the save file to a timestamped backup in a .backups subdirectory.
 ///
@@ -37,7 +54,7 @@ pub fn perform_backup(source_path: &Path) -> Result<PathBuf, String> {
         .extension()
         .unwrap_or_default()
         .to_string_lossy();
-    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S_%3f");
+    let timestamp = Local::now().format(TIMESTAMP_FORMAT);
 
     let backup_filename = if extension.is_empty() {
         format!("{}_{}", file_stem, timestamp)
@@ -103,6 +120,137 @@ pub fn prune_backups(backup_dir: &Path, retention_count: usize) -> Result<usize,
     Ok(deleted_count)
 }
 
+/// Lists all backups available for a given configuration path.
+///
+/// # Arguments
+///
+/// * `config_path` - The configured save path (file or directory).
+///
+/// # Returns
+///
+/// * `Result<Vec<BackupInfo>, String>` - List of available backups.
+pub fn get_backups(config_path: &Path) -> Result<Vec<BackupInfo>, String> {
+    let (backup_dir, target_filename) = if config_path.is_file() {
+        (
+            config_path.parent().unwrap().join(".backups"),
+            Some(
+                config_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+        )
+    } else {
+        (config_path.join(".backups"), None)
+    };
+
+    if !backup_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut backups = Vec::new();
+    let entries = fs::read_dir(&backup_dir).map_err(|e| e.to_string())?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_file() {
+            let filename = entry.file_name().to_string_lossy().into_owned();
+            let original_filename = derive_original_filename(&path);
+
+            // If filtering by specific file, ensure original filename matches exact target
+            if let Some(ref target) = target_filename {
+                if original_filename != *target {
+                    continue;
+                }
+            }
+
+            let metadata = entry.metadata().map_err(|e| e.to_string())?;
+            let modified: DateTime<Local> =
+                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
+
+            // Calculate original path
+            let original_path = if config_path.is_file() {
+                config_path.to_path_buf()
+            } else {
+                config_path.join(&original_filename)
+            };
+
+            backups.push(BackupInfo {
+                path: path.to_string_lossy().into_owned(),
+                filename,
+                original_filename,
+                original_path: original_path.to_string_lossy().into_owned(),
+                size: metadata.len(),
+                modified: modified.to_rfc3339(),
+            });
+        }
+    }
+
+    // Sort by modified desc
+    backups.sort_by(|a, b| b.modified.cmp(&a.modified));
+
+    Ok(backups)
+}
+
+/// Derives the original filename from a backup filename by stripping the timestamp suffix.
+///
+/// Expected backup format: `{original_stem}_{timestamp}.{ext}`
+/// where timestamp is `%Y-%m-%d_%H-%M-%S_%3f` (23 chars).
+///
+/// If the filename is shorter than expected or doesn't follow the pattern, returns the backup filename itself.
+fn derive_original_filename(backup_path: &Path) -> String {
+    let stem = backup_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let extension = backup_path
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy();
+
+    let stem_str = stem.as_ref();
+    if stem_str.len() > TIMESTAMP_SUFFIX_LEN {
+        let original_stem = &stem_str[..stem_str.len() - TIMESTAMP_SUFFIX_LEN];
+        if extension.is_empty() {
+            original_stem.to_string()
+        } else {
+            format!("{}.{}", original_stem, extension)
+        }
+    } else {
+        // Fallback if format doesn't match expected length
+        if extension.is_empty() {
+            stem.to_string()
+        } else {
+            format!("{}.{}", stem, extension)
+        }
+    }
+}
+
+/// Restores a backup file to the target location.
+///
+/// # Arguments
+///
+/// * `backup_path` - The path to the backup file.
+/// * `target_path` - The path where the file should be restored to.
+pub fn restore_backup(backup_path: &Path, target_path: &Path) -> Result<(), String> {
+    if !backup_path.exists() {
+        return Err("Backup file does not exist".to_string());
+    }
+
+    // Ensure target parent exists
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    // Copy (overwrite)
+    fs::copy(backup_path, target_path).map_err(|e| e.to_string())?;
+    log::info!("Restored {:?} to {:?}", backup_path, target_path);
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,14 +290,9 @@ mod tests {
         fs::create_dir_all(&backup_dir).unwrap();
 
         // Create 5 dummy backup files with different timestamps (simulated by sleep)
-        // Note: fs mtime granularity can be low, so we need sleeps or just trust OS handles it if we create them fast?
-        // Better to explicitly set mtime if possible, but that's complex in std.
-        // We'll just rely on creating them. If they have same timestamp, sort is unstable but that's fine for prune count.
-
         for i in 0..5 {
             let p = backup_dir.join(format!("backup_{}.sav", i));
             File::create(&p).unwrap();
-            // Sleep a bit to ensure mtime diff
             thread::sleep(Duration::from_millis(100));
         }
 
@@ -159,5 +302,74 @@ mod tests {
 
         let remaining = fs::read_dir(&backup_dir).unwrap().count();
         assert_eq!(remaining, 2);
+    }
+
+    #[test]
+    fn test_get_and_restore_backup() {
+        let dir = tempdir().unwrap();
+        let source_path = dir.path().join("save.sav");
+        {
+            let mut f = File::create(&source_path).unwrap();
+            writeln!(f, "original").unwrap();
+        }
+
+        // Make a backup
+        let backup_path = perform_backup(&source_path).unwrap();
+
+        // List backups
+        let backups = get_backups(dir.path()).unwrap(); // using dir path
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].path, backup_path.to_string_lossy());
+
+        // Modify source
+        {
+            let mut f = File::create(&source_path).unwrap();
+            writeln!(f, "modified").unwrap();
+        }
+
+        // Restore
+        restore_backup(&PathBuf::from(&backups[0].path), &source_path).unwrap();
+
+        // Check content
+        let content = fs::read_to_string(&source_path).unwrap();
+        assert_eq!(content.trim(), "original");
+    }
+
+    #[test]
+    fn test_derive_original_filename() {
+        // Mock path logic using PathBuf
+        let p = PathBuf::from("savegame_2026-01-23_14-05-01_123.sav");
+        assert_eq!(derive_original_filename(&p), "savegame.sav");
+
+        let p2 = PathBuf::from("my_save_2026-01-23_14-05-01_123.sav");
+        assert_eq!(derive_original_filename(&p2), "my_save.sav");
+
+        let p3 = PathBuf::from("short.sav");
+        assert_eq!(derive_original_filename(&p3), "short.sav");
+    }
+
+    #[test]
+    fn test_get_backups_filtering() {
+        let dir = tempdir().unwrap();
+        let source_path = dir.path().join("save.sav");
+        let unrelated_path = dir.path().join("save_other.sav"); // Prefix collision candidate
+
+        {
+            File::create(&source_path).unwrap();
+            File::create(&unrelated_path).unwrap();
+        }
+
+        let backup1 = perform_backup(&source_path).unwrap();
+        let backup2 = perform_backup(&unrelated_path).unwrap();
+
+        // Get backups strictly for "save.sav"
+        let backups = get_backups(&source_path).unwrap();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].path, backup1.to_string_lossy());
+
+        // Get backups strictly for "save_other.sav"
+        let backups_other = get_backups(&unrelated_path).unwrap();
+        assert_eq!(backups_other.len(), 1);
+        assert_eq!(backups_other[0].path, backup2.to_string_lossy());
     }
 }

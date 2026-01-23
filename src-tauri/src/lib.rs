@@ -3,9 +3,37 @@ mod config;
 mod save_paths;
 mod watcher;
 
+use backup::BackupInfo;
 use config::ConfigState;
 use std::path::PathBuf;
 use watcher::FileWatcher;
+
+/// Tauri command to list available backups for the configured save path.
+///
+/// Returns a list of `BackupInfo` objects.
+#[tauri::command]
+fn get_backups_command(state: tauri::State<ConfigState>) -> Result<Vec<BackupInfo>, String> {
+    let config = state.0.lock().unwrap();
+    if let Some(path_str) = &config.save_path {
+        let path = PathBuf::from(path_str);
+        backup::get_backups(&path)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Tauri command to restore a specific backup to a target location.
+///
+/// # Arguments
+///
+/// * `backup_path` - The absolute path to the backup file.
+/// * `target_path` - The absolute path where the file should be restored.
+#[tauri::command]
+fn restore_backup_command(backup_path: String, target_path: String) -> Result<(), String> {
+    let backup = PathBuf::from(backup_path);
+    let target = PathBuf::from(target_path);
+    backup::restore_backup(&backup, &target)
+}
 
 /// Runs the Tauri application entry point.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -39,7 +67,9 @@ pub fn run() {
             save_paths::detect_steam_save_paths,
             config::get_config,
             config::set_save_path,
-            config::validate_path
+            config::validate_path,
+            get_backups_command,
+            restore_backup_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
