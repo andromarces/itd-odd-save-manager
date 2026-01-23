@@ -50,7 +50,7 @@ pub fn run() {
     }
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(ConfigState(std::sync::Mutex::new(initial_config.clone())))
         .manage(watcher)
         .setup(move |app| {

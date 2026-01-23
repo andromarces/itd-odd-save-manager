@@ -3,7 +3,7 @@ use std::thread;
 use std::time::Duration;
 use sysinfo::{ProcessesToUpdate, System};
 use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_opener::OpenerExt;
 
 const GAME_APP_ID: &str = "2239710";
 // Matches "IntoTheDead" case-insensitively. This is a heuristic and relies on the
@@ -15,10 +15,9 @@ const PROCESS_NAME_PART: &str = "intothedead"; // Lowercase match
 #[tauri::command]
 pub fn launch_game<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     log::info!("Launching game via Steam...");
-    #[allow(deprecated)]
     match app
-        .shell()
-        .open(format!("steam://run/{}", GAME_APP_ID), None)
+        .opener()
+        .open_url(format!("steam://run/{}", GAME_APP_ID), None::<&str>)
     {
         Ok(_) => {
             log::info!("Game launch command sent successfully.");
