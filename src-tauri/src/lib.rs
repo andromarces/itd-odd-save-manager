@@ -65,6 +65,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             save_paths::detect_steam_save_paths,
+            save_paths::check_steam_cloud_path,
             config::get_config,
             config::set_save_path,
             config::validate_path,

@@ -89,6 +89,28 @@ pub(crate) fn detect_steam_save_paths() -> Vec<String> {
         .collect()
 }
 
+/// Checks if a given path appears to be a Steam Cloud path.
+///
+/// Returns true if the path contains 'userdata' and the App ID '2239710'.
+/// Comparison is case-insensitive to handle Windows paths correctly.
+pub(crate) fn is_steam_cloud_path(path: &Path) -> bool {
+    // Simple heuristic: check for app id and userdata in the path.
+    // Normalized to handle both slash types if needed, but path components are safer.
+    // Use to_string_lossy() and eq_ignore_ascii_case for case-insensitive comparison on Windows.
+    let has_app_id = path.iter().any(|p| p.to_string_lossy() == STEAM_APP_ID);
+    let has_userdata = path
+        .iter()
+        .any(|p| p.to_string_lossy().eq_ignore_ascii_case("userdata"));
+
+    has_app_id && has_userdata
+}
+
+/// Tauri command to check if the provided path is a Steam Cloud path.
+#[tauri::command]
+pub(crate) fn check_steam_cloud_path(path: String) -> bool {
+    is_steam_cloud_path(Path::new(&path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,5 +143,20 @@ mod tests {
         let matches = find_steam_save_dirs(&steam_root);
 
         assert!(matches.is_empty());
+    }
+
+    /// Tests the `is_steam_cloud_path` heuristic with various path combinations, including case sensitivity.
+    #[test]
+    fn test_is_steam_cloud_path() {
+        let cloud_path =
+            PathBuf::from("C:\\Program Files (x86)\\Steam\\userdata\\12345\\2239710\\remote");
+        let local_path = PathBuf::from("C:\\Games\\IntoTheDead\\Saves");
+        let partial_path = PathBuf::from("C:\\Steam\\userdata\\12345\\999999\\remote");
+        let mixed_case_path = PathBuf::from("C:\\Steam\\UserDATA\\12345\\2239710\\remote");
+
+        assert!(is_steam_cloud_path(&cloud_path));
+        assert!(!is_steam_cloud_path(&local_path));
+        assert!(!is_steam_cloud_path(&partial_path));
+        assert!(is_steam_cloud_path(&mixed_case_path));
     }
 }

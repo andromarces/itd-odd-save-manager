@@ -194,7 +194,19 @@ async function loadBackups(): Promise<void> {
  * Restores a backup.
  */
 async function restoreBackup(backup: BackupInfo): Promise<void> {
-  const confirmed = window.confirm(`Are you sure you want to restore "${backup.original_filename}" from ${formatDate(backup.modified)}?\nThis will overwrite the current save file.`)
+  let message = `Are you sure you want to restore "${backup.original_filename}" from ${formatDate(backup.modified)}?`
+  message += `\nThis will overwrite the current save file.`
+
+  try {
+    const isCloud = await invoke<boolean>('check_steam_cloud_path', { path: backup.original_path })
+    if (isCloud) {
+      message += `\n\nWARNING: Steam Cloud folder detected.\nSteam may overwrite this restore with its cloud copy unless you launch in Offline Mode or disable Steam Cloud.`
+    }
+  } catch (error) {
+    console.warn('Failed to check Steam Cloud status:', error)
+  }
+
+  const confirmed = window.confirm(message)
   if (!confirmed) return
 
   try {

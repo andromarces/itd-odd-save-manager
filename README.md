@@ -19,6 +19,16 @@ Portable auto‑save backup app for _Into the Dead: Our Darkest Days_. The initi
 - Steam Cloud‑aware mode (warnings/guardrails).
 - Optional auto‑launch and auto‑close tied to the game.
 
+## Steam Cloud Support
+
+The application automatically detects if your save files are located within the Steam Cloud synchronization folder (`userdata`).
+
+- **Detection**: If a Steam Cloud path is detected, the app will flag it internally.
+- **Restoring**: When attempting to restore a backup to a Steam Cloud location, you will receive a warning.
+- **Conflict**: Steam Cloud may overwrite your restored file with its own cloud copy upon game launch. To prevent this, consider:
+  - Disabling Steam Cloud for this game.
+  - Launching Steam in Offline Mode.
+
 ## Non‑Functional / UX
 
 - Tray app with a normal window when not minimized.
