@@ -1,0 +1,13 @@
+#!/bin/sh
+# Pre-commit hook to check Rust formatting
+echo "Running pre-commit check: Rust Formatting..."
+
+cd src-tauri || { echo "Error: Could not change directory to src-tauri"; exit 1; }
+
+if ! cargo fmt -- --check; then
+    echo "Validation Failed: Rust code is not formatted correctly."
+    echo "Run 'cargo fmt' inside 'src-tauri/' (or 'npm run format') to fix it."
+    exit 1
+fi
+
+echo "Rust formatting verified."
