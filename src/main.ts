@@ -1,3 +1,5 @@
+// ITD ODD Save Manager by andromarces
+
 import { invoke } from '@tauri-apps/api/core'
 import './style.css'
 
@@ -157,10 +159,17 @@ function renderPaths(paths: string[]): void {
     const item = document.createElement('li')
     item.textContent = path
     item.title = 'Click to use this path'
-    item.addEventListener('click', () => {
+
+    /**
+     * Handler to select the clicked path.
+     * Updates the manual input field and status message.
+     */
+    const onPathClick = (): void => {
       manualInput!.value = path
       setConfigStatus('Path selected from list. Click "Set Path" to save.', 'info')
-    })
+    }
+
+    item.addEventListener('click', onPathClick)
     pathsList!.appendChild(item)
   }
 }
@@ -202,7 +211,15 @@ function renderBackups(backups: BackupInfo[]): void {
     const restoreBtn = document.createElement('button')
     restoreBtn.textContent = 'Restore'
     restoreBtn.className = 'small'
-    restoreBtn.addEventListener('click', () => restoreBackup(backup))
+
+    /**
+     * Handler to trigger the restore process for this backup.
+     */
+    const onRestoreClick = (): void => {
+      void restoreBackup(backup)
+    }
+
+    restoreBtn.addEventListener('click', onRestoreClick)
     actionCell.appendChild(restoreBtn)
 
     row.appendChild(fileCell)
@@ -395,29 +412,60 @@ async function detectSteamSavePaths(): Promise<void> {
 }
 
 // Event Listeners
-detectButton!.addEventListener('click', () => {
+
+/**
+ * Handler for the "Auto Detect Steam Paths" button click.
+ * Triggers the backend detection logic and updates the UI.
+ */
+const onDetectClick = (): void => {
   void detectSteamSavePaths()
-})
+}
+detectButton!.addEventListener('click', onDetectClick)
 
-saveButton!.addEventListener('click', () => {
+/**
+ * Handler for the "Set Path" button click.
+ * Validates and saves the user-provided save path.
+ */
+const onSavePathClick = (): void => {
   void savePath()
-})
+}
+saveButton!.addEventListener('click', onSavePathClick)
 
-refreshBackupsButton!.addEventListener('click', () => {
+/**
+ * Handler for the "Refresh Backups" button click.
+ * Reloads the list of backups from the backend.
+ */
+const onRefreshBackupsClick = (): void => {
   void loadBackups()
-})
+}
+refreshBackupsButton!.addEventListener('click', onRefreshBackupsClick)
 
-launchGameButton!.addEventListener('click', () => {
+/**
+ * Handler for the "Launch Game" button click.
+ * Sends the launch command to the backend.
+ */
+const onLaunchGameClick = (): void => {
   void launchGame()
-})
+}
+launchGameButton!.addEventListener('click', onLaunchGameClick)
 
-autoLaunchCheck!.addEventListener('change', () => {
+/**
+ * Handler for changes to the "Auto-launch game" checkbox.
+ * Saves the updated game settings.
+ */
+const onAutoLaunchChange = (): void => {
   void saveGameSettings()
-})
+}
+autoLaunchCheck!.addEventListener('change', onAutoLaunchChange)
 
-autoCloseCheck!.addEventListener('change', () => {
+/**
+ * Handler for changes to the "Auto-close app" checkbox.
+ * Saves the updated game settings.
+ */
+const onAutoCloseChange = (): void => {
   void saveGameSettings()
-})
+}
+autoCloseCheck!.addEventListener('change', onAutoCloseChange)
 
 // Initial load
 void loadConfig()

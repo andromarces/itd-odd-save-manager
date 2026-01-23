@@ -1,3 +1,5 @@
+// ITD ODD Save Manager by andromarces
+
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -130,9 +132,26 @@ pub fn prune_backups(backup_dir: &Path, retention_count: usize) -> Result<usize,
 ///
 /// * `Result<Vec<BackupInfo>, String>` - List of available backups.
 pub fn get_backups(config_path: &Path) -> Result<Vec<BackupInfo>, String> {
-    let (backup_dir, target_filename) = if config_path.is_file() {
+    // Determine if we should treat the config_path as a file or a directory.
+    // If the path exists, we use the filesystem metadata.
+    // If it doesn't exist (e.g., save file deleted), we infer from the extension.
+    let is_file_mode = if config_path.exists() {
+        config_path.is_file()
+    } else {
+        // Only treat as file if it has a specific extension known for save files (e.g. .sav)
+        // to avoid treating directories with dots (e.g. "My.Saves") as files.
+        config_path
+            .extension()
+            .map(|ext| ext.to_string_lossy().eq_ignore_ascii_case("sav"))
+            .unwrap_or(false)
+    };
+
+    let (backup_dir, target_filename) = if is_file_mode {
         (
-            config_path.parent().unwrap().join(".backups"),
+            config_path
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join(".backups"),
             Some(
                 config_path
                     .file_name()
@@ -171,7 +190,7 @@ pub fn get_backups(config_path: &Path) -> Result<Vec<BackupInfo>, String> {
                 metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
 
             // Calculate original path
-            let original_path = if config_path.is_file() {
+            let original_path = if is_file_mode {
                 config_path.to_path_buf()
             } else {
                 config_path.join(&original_filename)
@@ -371,5 +390,45 @@ mod tests {
         let backups_other = get_backups(&unrelated_path).unwrap();
         assert_eq!(backups_other.len(), 1);
         assert_eq!(backups_other[0].path, backup2.to_string_lossy());
+    }
+
+    #[test]
+    fn test_get_backups_missing_file_heuristic() {
+        let dir = tempdir().unwrap();
+
+        // Case 1: Missing file with .sav extension -> Should be treated as file
+        // Expected behavior: Look in parent/.backups
+        let missing_file = dir.path().join("missing_save.sav");
+        let backup_dir_for_file = dir.path().join(".backups");
+        fs::create_dir_all(&backup_dir_for_file).unwrap();
+
+        // Create a dummy backup that matches the missing file pattern
+        let timestamp = Local::now().format(TIMESTAMP_FORMAT);
+        let backup_name = format!("missing_save_{}.sav", timestamp);
+        let backup_path = backup_dir_for_file.join(&backup_name);
+        File::create(&backup_path).unwrap();
+
+        let backups = get_backups(&missing_file).unwrap();
+        assert_eq!(backups.len(), 1, "Should find backup for missing .sav file");
+        assert_eq!(backups[0].filename, backup_name);
+
+        // Case 2: Missing path without .sav extension -> Should be treated as directory
+        // Expected behavior: Look in path/.backups
+        let missing_dir = dir.path().join("missing_dir");
+        let backup_dir_for_dir = missing_dir.join(".backups");
+        fs::create_dir_all(&backup_dir_for_dir).unwrap(); // create the backup dir structure
+
+        // Create a dummy backup inside this directory structure
+        let dir_backup_name = format!("save_{}.sav", timestamp);
+        let dir_backup_path = backup_dir_for_dir.join(&dir_backup_name);
+        File::create(&dir_backup_path).unwrap();
+
+        let backups_dir = get_backups(&missing_dir).unwrap();
+        assert_eq!(
+            backups_dir.len(),
+            1,
+            "Should find backup for directory mode"
+        );
+        assert_eq!(backups_dir[0].filename, dir_backup_name);
     }
 }

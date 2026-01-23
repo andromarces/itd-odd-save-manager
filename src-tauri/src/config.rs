@@ -1,3 +1,5 @@
+// ITD ODD Save Manager by andromarces
+
 use crate::watcher::FileWatcher;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -82,15 +84,20 @@ pub fn set_save_path(
         return Err("The provided path does not exist.".to_string());
     }
 
-    // Update Config
-    let mut config = config_state.0.lock().map_err(|e| {
+    // Update Config with state consistency check
+    // We lock, clone, modify, save, and THEN update the lock only if save succeeds.
+    let mut config_guard = config_state.0.lock().map_err(|e| {
         log::error!("Failed to acquire lock on configuration state: {}", e);
         "Failed to acquire lock on configuration state".to_string()
     })?;
 
-    config.save_path = Some(path.clone());
+    let mut new_config = config_guard.clone();
+    new_config.save_path = Some(path.clone());
 
-    save_config(&config)?;
+    save_config(&new_config)?;
+
+    // Save succeeded, update in-memory state
+    *config_guard = new_config;
 
     // Update Watcher
     // This is done after saving config
@@ -119,15 +126,20 @@ pub fn set_game_settings(
         auto_close
     );
 
-    let mut config = config_state.0.lock().map_err(|e| {
+    let mut config_guard = config_state.0.lock().map_err(|e| {
         log::error!("Failed to acquire lock on configuration state: {}", e);
         "Failed to acquire lock on configuration state".to_string()
     })?;
 
-    config.auto_launch_game = auto_launch_game;
-    config.auto_close = auto_close;
+    let mut new_config = config_guard.clone();
+    new_config.auto_launch_game = auto_launch_game;
+    new_config.auto_close = auto_close;
 
-    save_config(&config)
+    save_config(&new_config)?;
+
+    *config_guard = new_config;
+
+    Ok(())
 }
 
 /// Serializes and writes the configuration to disk.

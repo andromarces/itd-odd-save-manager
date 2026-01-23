@@ -1,3 +1,5 @@
+// ITD ODD Save Manager by andromarces
+
 use crate::config::ConfigState;
 use std::thread;
 use std::time::Duration;

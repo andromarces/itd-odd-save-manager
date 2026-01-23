@@ -1,3 +1,5 @@
+// ITD ODD Save Manager by andromarces
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

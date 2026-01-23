@@ -1,3 +1,5 @@
+// ITD ODD Save Manager by andromarces
+
 mod backup;
 mod config;
 mod game_manager;
@@ -18,7 +20,10 @@ struct TrayState(#[allow(dead_code)] tauri::tray::TrayIcon);
 /// Tauri command to list available backups for the configured save path.
 #[tauri::command]
 fn get_backups_command(state: tauri::State<ConfigState>) -> Result<Vec<BackupInfo>, String> {
-    let config = state.0.lock().unwrap();
+    let config = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock config: {}", e))?;
     if let Some(path_str) = &config.save_path {
         let path = PathBuf::from(path_str);
         backup::get_backups(&path)

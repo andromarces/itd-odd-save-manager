@@ -1,3 +1,5 @@
+// ITD ODD Save Manager by andromarces
+
 use crate::backup::{perform_backup, prune_backups};
 use log::{error, info};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};

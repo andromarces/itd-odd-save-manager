@@ -70,3 +70,10 @@ The application automatically detects if your save files are located within the 
 - The compiled executable will be located in:
   - `src-tauri/target/release/ITD ODD Save Manager.exe` (Windows)
   - This file is portable and can be moved/run from anywhere.
+
+## License & Attribution
+
+This project is licensed under the MIT License with an additional attribution requirement.
+
+**Attribution**:
+"ITD ODD Save Manager by andromarces"
