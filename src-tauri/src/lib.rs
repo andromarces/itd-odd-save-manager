@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
+#[cfg(target_os = "linux")]
+use tauri_plugin_notification::NotificationExt;
 use watcher::FileWatcher;
 
 // Store tray icon to prevent it from being dropped
@@ -41,10 +43,28 @@ fn restore_backup_command(backup_path: String, target_path: String) -> Result<()
 }
 
 /// Helper to show and focus the main window.
-fn show_main_window(app: &tauri::AppHandle) {
+fn show_main_window(app: &tauri::AppHandle, _from_second_instance: bool) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
-        let _ = window.set_focus();
+        let _ = window.unminimize();
+
+        // Foregrounding reliable on Windows and macOS, inconsistent on Linux
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        {
+            let _ = window.set_focus();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            if _from_second_instance {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Already Running")
+                    .body("ITD ODD Save Manager is already active.")
+                    .show();
+            }
+        }
     }
 }
 
@@ -64,6 +84,10 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app, true);
+        }))
         .manage(ConfigState(std::sync::Mutex::new(initial_config.clone())))
         .manage(watcher)
         .setup(move |app| {
@@ -97,7 +121,7 @@ pub fn run() {
                                 app.exit(0);
                             }
                             "open" => {
-                                show_main_window(app);
+                                show_main_window(app, false);
                             }
                             "launch" => {
                                 let _ = game_manager::launch_game(app.clone());
@@ -107,7 +131,7 @@ pub fn run() {
                     })
                     .on_tray_icon_event(|tray, event: tauri::tray::TrayIconEvent| {
                         if let tauri::tray::TrayIconEvent::Click { .. } = event {
-                            show_main_window(tray.app_handle());
+                            show_main_window(tray.app_handle(), false);
                         }
                     })
                     .icon(icon)
