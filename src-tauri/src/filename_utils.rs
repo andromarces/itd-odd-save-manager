@@ -124,9 +124,7 @@ mod tests {
     /// Tests parsing from a full path.
     #[test]
     fn test_parse_path() {
-        let p = PathBuf::from(
-            r"C:\Users\User\AppData\LocalLow\PikPok\IntoTheDeadOurDarkestDays\gamesave_1.sav",
-        );
+        let p = PathBuf::from("base").join("subdir").join("gamesave_1.sav");
         assert_eq!(
             parse_path(&p),
             Some(SaveFileInfo {

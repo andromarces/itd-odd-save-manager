@@ -18,7 +18,6 @@ const DEBOUNCE_DURATION: Duration = Duration::from_secs(2);
 #[derive(Clone)]
 pub struct FileWatcher {
     watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
-    current_path: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl FileWatcher {
@@ -26,7 +25,6 @@ impl FileWatcher {
     pub fn new() -> Self {
         Self {
             watcher: Arc::new(Mutex::new(None)),
-            current_path: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -69,7 +67,6 @@ impl FileWatcher {
 
         // Store watcher
         *self.watcher.lock().unwrap() = Some(watcher);
-        *self.current_path.lock().unwrap() = Some(path.clone());
 
         // Spawn debouncing thread
         thread::spawn(move || {
@@ -85,7 +82,6 @@ impl FileWatcher {
         let mut watcher_guard = self.watcher.lock().unwrap();
         if watcher_guard.is_some() {
             *watcher_guard = None;
-            *self.current_path.lock().unwrap() = None;
             info!("Stopped watching");
         }
     }
