@@ -68,6 +68,19 @@ fn show_main_window(app: &tauri::AppHandle, _from_second_instance: bool) {
     }
 }
 
+/// Determines whether a tray icon event should show and focus the main window.
+fn should_show_main_window_from_tray_event(event: &tauri::tray::TrayIconEvent) -> bool {
+    match event {
+        tauri::tray::TrayIconEvent::Click { button, .. } => {
+            matches!(button, tauri::tray::MouseButton::Left)
+        }
+        tauri::tray::TrayIconEvent::DoubleClick { button, .. } => {
+            matches!(button, tauri::tray::MouseButton::Left)
+        }
+        _ => false,
+    }
+}
+
 /// Runs the Tauri application entry point.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -130,7 +143,7 @@ pub fn run() {
                         }
                     })
                     .on_tray_icon_event(|tray, event: tauri::tray::TrayIconEvent| {
-                        if let tauri::tray::TrayIconEvent::Click { .. } = event {
+                        if should_show_main_window_from_tray_event(&event) {
                             show_main_window(tray.app_handle(), false);
                         }
                     })
@@ -176,4 +189,59 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent, TrayIconId};
+
+    /// Builds a tray click event with the provided mouse button.
+    fn make_click_event(button: MouseButton) -> TrayIconEvent {
+        TrayIconEvent::Click {
+            button,
+            button_state: MouseButtonState::Down,
+            id: TrayIconId::new("test"),
+            position: tauri::PhysicalPosition::default(),
+            rect: tauri::Rect::default(),
+        }
+    }
+
+    /// Builds a tray double click event with the provided mouse button.
+    fn make_double_click_event(button: MouseButton) -> TrayIconEvent {
+        TrayIconEvent::DoubleClick {
+            button,
+            id: TrayIconId::new("test"),
+            position: tauri::PhysicalPosition::default(),
+            rect: tauri::Rect::default(),
+        }
+    }
+
+    /// Verifies that a left click triggers the main window behavior.
+    #[test]
+    fn tray_left_click_shows_main_window() {
+        let event = make_click_event(MouseButton::Left);
+        assert!(should_show_main_window_from_tray_event(&event));
+    }
+
+    /// Verifies that a right click does not trigger the main window behavior.
+    #[test]
+    fn tray_right_click_does_not_show_main_window() {
+        let event = make_click_event(MouseButton::Right);
+        assert!(!should_show_main_window_from_tray_event(&event));
+    }
+
+    /// Verifies that a left double click triggers the main window behavior.
+    #[test]
+    fn tray_left_double_click_shows_main_window() {
+        let event = make_double_click_event(MouseButton::Left);
+        assert!(should_show_main_window_from_tray_event(&event));
+    }
+
+    /// Verifies that a right double click does not trigger the main window behavior.
+    #[test]
+    fn tray_right_double_click_does_not_show_main_window() {
+        let event = make_double_click_event(MouseButton::Right);
+        assert!(!should_show_main_window_from_tray_event(&event));
+    }
 }
