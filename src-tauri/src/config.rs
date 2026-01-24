@@ -70,11 +70,29 @@ pub fn load_initial_config() -> AppConfig {
 }
 
 /// Validates if the provided string is a valid path (file or directory).
+///
+/// If the path itself does not exist, it only accepts it if it looks like a file
+/// (has an extension) and its parent directory exists.
 fn is_valid_path(path: &str) -> bool {
-    Path::new(path).exists()
+    let p = Path::new(path);
+    if p.exists() {
+        return true;
+    }
+    // Only accept non-existent file paths if parent exists
+    if let Some(parent) = p.parent() {
+        if parent.exists() {
+            // Heuristic: if it has an extension, treat as file path
+            return p.extension().is_some();
+        }
+    }
+    false
 }
 
 /// Retrieves the current application configuration.
+///
+/// # Returns
+///
+/// * `Result<AppConfig, String>` - The current configuration or an error message.
 #[tauri::command(rename_all = "snake_case")]
 pub fn get_config(state: State<ConfigState>) -> Result<AppConfig, String> {
     log::info!("Retrieving configuration");
@@ -104,38 +122,87 @@ where
 }
 
 /// Sets the save path in the configuration, persists it, and updates the watcher.
+///
+/// Normalizes the input path to a directory. If a file path is provided,
+/// its parent directory is used.
+///
+/// # Arguments
+///
+/// * `path` - The user-provided path string.
+///
+/// # Returns
+///
+/// * `Result<String, String>` - The normalized path string on success, or an error message.
 #[tauri::command(rename_all = "snake_case")]
 pub fn set_save_path(
     config_state: State<ConfigState>,
     watcher: State<FileWatcher>,
     path: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     log::info!("Attempting to set save path to: {}", path);
 
+    // Validate using the refined rule (path exists OR non-existent file with existing parent)
     if !is_valid_path(&path) {
-        log::warn!("Validation failed: Path does not exist");
-        return Err("The provided path does not exist.".to_string());
+        log::warn!("Validation failed: Path (or its parent) does not exist or is an invalid directory entry");
+        return Err(
+            "The provided path must exist, or be a new file path within an existing directory."
+                .to_string(),
+        );
     }
 
-    update_config(&config_state, |config| {
-        config.save_path = Some(path.clone());
-    })?;
+    let path_buf = PathBuf::from(&path);
+
+    // Normalize to directory:
+    // If it is a file (exists and is file), use parent.
+    // If it does not exist but looks like a file (has extension), use parent.
+    // Otherwise assume directory.
+    let final_path = if path_buf.is_file() {
+        path_buf
+            .parent()
+            .map(|p| p.to_path_buf())
+            .ok_or("Invalid file path")?
+    } else if !path_buf.exists() && path_buf.extension().is_some() {
+        // Path doesn't exist, but has extension, treat as file path and use parent
+        path_buf
+            .parent()
+            .map(|p| p.to_path_buf())
+            .ok_or("Invalid file path")?
+    } else {
+        path_buf
+    };
+
+    let final_path_str = final_path.to_string_lossy().to_string();
+    log::info!("Normalized save path to: {}", final_path_str);
 
     // Update Watcher
-    // This is done after saving config
-    let path_buf = PathBuf::from(path);
-    if let Err(e) = watcher.start(path_buf) {
+    if let Err(e) = watcher.start(final_path) {
         log::error!("Failed to start watcher: {}", e);
+
+        // Disable auto-backup on failure
+        let _ = update_config(&config_state, |config| {
+            config.save_path = None;
+        });
+
         return Err(format!(
-            "Configuration saved, but failed to start watcher: {}",
+            "Configuration path accepted, but failed to start monitoring. Auto-backup has been disabled. Error: {}",
             e
         ));
     }
 
-    Ok(())
+    // Success -> persist normalized path
+    update_config(&config_state, |config| {
+        config.save_path = Some(final_path_str.clone());
+    })?;
+
+    Ok(final_path_str)
 }
 
 /// Sets the game launch and auto-close settings.
+///
+/// # Arguments
+///
+/// * `auto_launch_game` - Enable/disable auto-launch.
+/// * `auto_close` - Enable/disable auto-close.
 #[tauri::command(rename_all = "snake_case")]
 pub fn set_game_settings(
     config_state: State<ConfigState>,
@@ -172,6 +239,8 @@ fn save_config(config: &AppConfig) -> Result<(), String> {
 }
 
 /// Checks if a path is valid.
+///
+/// Returns true if the path exists OR if the parent directory exists and looks like a file path.
 #[tauri::command(rename_all = "snake_case")]
 pub fn validate_path(path: String) -> bool {
     let is_valid = is_valid_path(&path);
@@ -222,6 +291,25 @@ mod tests {
         let temp_dir = tempdir().expect("failed to create temp dir");
         let path_str = temp_dir.path().to_string_lossy().to_string();
         assert!(is_valid_path(&path_str));
+    }
+
+    /// Tests that a non-existent file path with an existing parent returns true.
+    #[test]
+    fn test_validate_path_non_existent_file_with_parent() {
+        let temp_dir = tempdir().expect("failed to create temp dir");
+        let future_file = temp_dir.path().join("future.sav");
+        let path_str = future_file.to_string_lossy().to_string();
+        assert!(is_valid_path(&path_str));
+    }
+
+    /// Tests that a non-existent directory path returns false.
+    #[test]
+    fn test_validate_path_non_existent_dir_with_parent() {
+        let temp_dir = tempdir().expect("failed to create temp dir");
+        let future_dir = temp_dir.path().join("future_dir");
+        // No extension, should be treated as directory
+        let path_str = future_dir.to_string_lossy().to_string();
+        assert!(!is_valid_path(&path_str));
     }
 
     /// Tests that a valid file path returns true.

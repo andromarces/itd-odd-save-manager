@@ -1,291 +1,304 @@
 // ITD ODD Save Manager by andromarces
 
-use chrono::{DateTime, Local};
+use crate::filename_utils;
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-const TIMESTAMP_FORMAT: &str = "%Y-%m-%d_%H-%M-%S_%3f";
-// Length of "YYYY-MM-DD_HH-MM-SS_MS" is 23 chars.
-// Plus the preceding underscore separator is 24 chars.
-const TIMESTAMP_SUFFIX_LEN: usize = 24;
+const BACKUP_DIR_NAME: &str = ".backups";
+const HASH_FILE_NAME: &str = ".hash";
 
+/// Represents metadata for a backup entry.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BackupInfo {
+    /// The absolute path to the backup folder.
     pub path: String,
+    /// The display name of the backup folder (e.g., "Game 1 - ...").
     pub filename: String,
+    /// The name of the original save file (e.g., "gamesave_0.sav").
     pub original_filename: String,
+    /// The original path where the save file resides.
     pub original_path: String,
+    /// The size of the save file in bytes.
     pub size: u64,
-    pub modified: String, // ISO 8601
+    /// The modification timestamp (ISO 8601).
+    pub modified: String,
+    /// The game number (0-based for internal logic).
+    pub game_number: u32,
 }
 
-/// Copies the save file to a timestamped backup in a .backups subdirectory.
+/// Backs up a specific game slot by directory and game number.
+///
+/// Creates a backup folder named "Game {N+1} - {Timestamp}" to be user-friendly.
 ///
 /// # Arguments
 ///
-/// * `source_path` - The path to the source file to backup.
+/// * `save_dir` - The directory containing the save files.
+/// * `game_number` - The 0-based game number index.
 ///
 /// # Returns
 ///
-/// * `Result<PathBuf, String>` - The path to the created backup file on success, or an error message.
-pub fn perform_backup(source_path: &Path) -> Result<PathBuf, String> {
-    // Check if source exists
-    if !source_path.exists() {
-        return Err(format!("Source file does not exist: {:?}", source_path));
+/// * `Result<Option<PathBuf>, String>` - The path to the created backup folder, or None if skipped.
+pub fn perform_backup_for_game(
+    save_dir: &Path,
+    game_number: u32,
+) -> Result<Option<PathBuf>, String> {
+    if !save_dir.exists() {
+        return Err(format!("Save directory does not exist: {:?}", save_dir));
     }
 
-    // Determine directories
-    let parent_dir = source_path
-        .parent()
-        .ok_or("Could not get parent directory")?;
-    let backup_dir = parent_dir.join(".backups");
+    let main_filename = format!("gamesave_{}.sav", game_number);
+    let main_path = save_dir.join(&main_filename);
+    let bak_filename = format!("gamesave_{}.sav.bak", game_number);
+    let bak_path = save_dir.join(&bak_filename);
 
-    // Create backup dir if needed
-    if !backup_dir.exists() {
-        fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
+    if !main_path.exists() {
+        // Skip if main save is missing, even if .bak exists (requirement)
+        if bak_path.exists() {
+            log::info!(
+                "Only .bak exists for game {}, skipping backup.",
+                game_number
+            );
+        } else {
+            log::info!(
+                "Main save file not found for game {}, skipping backup.",
+                game_number
+            );
+        }
+        return Ok(None);
     }
 
-    // Generate filename
-    let file_stem = source_path
-        .file_stem()
-        .ok_or("Invalid filename")?
-        .to_string_lossy();
-    let extension = source_path
-        .extension()
-        .unwrap_or_default()
-        .to_string_lossy();
-    let timestamp = Local::now().format(TIMESTAMP_FORMAT);
+    // Calculate hash of main save
+    let hash = calculate_hash(&main_path)?;
 
-    let backup_filename = if extension.is_empty() {
-        format!("{}_{}", file_stem, timestamp)
-    } else {
-        format!("{}_{}.{}", file_stem, timestamp, extension)
-    };
+    // Check for existing duplicates in .backups
+    let backup_root = save_dir.join(BACKUP_DIR_NAME);
+    // Display number is 1-based (Internal 0 -> Game 1)
+    let display_number = game_number + 1;
+    let folder_prefix = format!("Game {} -", display_number);
 
-    let backup_path = backup_dir.join(backup_filename);
+    if backup_root.exists() {
+        if let Ok(entries) = fs::read_dir(&backup_root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    // Check if this folder belongs to the same game number (optimization)
+                    // Folder format: "Game {N} - ..."
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if !name.starts_with(&folder_prefix) {
+                            continue;
+                        }
+                    }
 
-    // Copy file
-    fs::copy(source_path, &backup_path).map_err(|e| e.to_string())?;
-
-    log::info!("Backup successful: {:?}", backup_path);
-
-    Ok(backup_path)
-}
-
-/// Keeps only the N most recent backups in the directory.
-/// Returns the number of files deleted.
-///
-/// # Arguments
-///
-/// * `backup_dir` - The directory containing backup files.
-/// * `retention_count` - The number of most recent backups to keep.
-pub fn prune_backups(backup_dir: &Path, retention_count: usize) -> Result<usize, String> {
-    if !backup_dir.exists() {
-        return Ok(0);
-    }
-
-    let mut entries = fs::read_dir(backup_dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.path().is_file())
-        .map(|entry| {
-            let modified = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            (entry, modified)
-        })
-        .collect::<Vec<_>>();
-
-    // Sort by modification time, newest first
-    entries.sort_by(|a, b| b.1.cmp(&a.1));
-
-    let mut deleted_count = 0;
-    if entries.len() > retention_count {
-        for (entry, _) in entries.iter().skip(retention_count) {
-            if fs::remove_file(entry.path()).is_ok() {
-                deleted_count += 1;
+                    let hash_path = path.join(HASH_FILE_NAME);
+                    if hash_path.exists() {
+                        if let Ok(existing_hash) = fs::read_to_string(&hash_path) {
+                            if existing_hash.trim() == hash {
+                                log::info!(
+                                    "Duplicate backup found for game {} (hash match), skipping.",
+                                    game_number
+                                );
+                                return Ok(None);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
-    if deleted_count > 0 {
-        log::info!("Pruned {} old backups", deleted_count);
+    // Proceed with backup
+    // Get modification time of main save for folder naming
+    let metadata = fs::metadata(&main_path).map_err(|e| e.to_string())?;
+    let modified: DateTime<Local> = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
+
+    // Format: Game N - dd-MMM-yyyy hh-mm-ss AM
+    // e.g. Game 1 - 03-Jan-2026 01-09-05 AM
+    let timestamp_str = modified.format("%d-%b-%Y %I-%M-%S %p").to_string();
+    let folder_name = format!("{} {}", folder_prefix.trim(), timestamp_str);
+
+    let target_dir = backup_root.join(&folder_name);
+    fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+
+    // Copy files
+    fs::copy(&main_path, target_dir.join(&main_filename)).map_err(|e| e.to_string())?;
+    if bak_path.exists() {
+        fs::copy(&bak_path, target_dir.join(&bak_filename)).map_err(|e| e.to_string())?;
     }
 
-    Ok(deleted_count)
+    // Write hash
+    fs::write(target_dir.join(HASH_FILE_NAME), &hash).map_err(|e| e.to_string())?;
+
+    log::info!(
+        "Backup created for game {} at {:?}",
+        game_number,
+        target_dir
+    );
+    Ok(Some(target_dir))
 }
 
-/// Lists all backups available for a given configuration path.
+/// Lists all backups available in the .backups directory.
+///
+/// Parses the backup folder name to derive the timestamp and game number.
 ///
 /// # Arguments
 ///
-/// * `config_path` - The configured save path (file or directory).
+/// * `save_dir` - The directory containing the `.backups` folder.
 ///
 /// # Returns
 ///
-/// * `Result<Vec<BackupInfo>, String>` - List of available backups.
-pub fn get_backups(config_path: &Path) -> Result<Vec<BackupInfo>, String> {
-    // Determine if we should treat the config_path as a file or a directory.
-    // If the path exists, we use the filesystem metadata.
-    // If it doesn't exist (e.g., save file deleted), we infer from the extension.
-    let is_file_mode = if config_path.exists() {
-        config_path.is_file()
-    } else {
-        // Only treat as file if it has a specific extension known for save files (e.g. .sav)
-        // to avoid treating directories with dots (e.g. "My.Saves") as files.
-        config_path
-            .extension()
-            .map(|ext| ext.to_string_lossy().eq_ignore_ascii_case("sav"))
-            .unwrap_or(false)
-    };
-
-    let (backup_dir, target_filename) = if is_file_mode {
-        (
-            config_path
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join(".backups"),
-            Some(
-                config_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-            ),
-        )
-    } else {
-        (config_path.join(".backups"), None)
-    };
-
-    if !backup_dir.exists() {
+/// * `Result<Vec<BackupInfo>, String>` - A list of available backups.
+pub fn get_backups(save_dir: &Path) -> Result<Vec<BackupInfo>, String> {
+    let backup_root = save_dir.join(BACKUP_DIR_NAME);
+    if !backup_root.exists() {
         return Ok(Vec::new());
     }
 
-    struct RawBackupEntry {
-        path: PathBuf,
-        filename: String,
-        original_filename: String,
-        original_path: String,
-        size: u64,
-        modified: DateTime<Local>,
-    }
+    let mut backups = Vec::new();
 
-    let mut raw_backups = Vec::new();
-    let entries = fs::read_dir(&backup_dir).map_err(|e| e.to_string())?;
-
-    for entry in entries {
+    for entry in fs::read_dir(&backup_root).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        if path.is_file() {
-            let filename = entry.file_name().to_string_lossy().into_owned();
-            let original_filename = derive_original_filename(&path);
 
-            // If filtering by specific file, ensure original filename matches exact target
-            if let Some(ref target) = target_filename {
-                if original_filename != *target {
-                    continue;
+        if path.is_dir() {
+            let folder_name = entry.file_name().to_string_lossy().to_string();
+
+            // Expected Format: "Game {N} - {Timestamp}"
+            // where Timestamp is "dd-MMM-yyyy hh-mm-ss AM"
+            if let Some((prefix, date_part)) = folder_name.split_once(" - ") {
+                // Parse "Game {N}"
+                if let Some(stripped_prefix) = prefix.strip_prefix("Game ") {
+                    if let Ok(display_number) = stripped_prefix.parse::<u32>() {
+                        // Internal game number is 0-based
+                        let game_number = display_number.saturating_sub(1);
+
+                        // Parse timestamp using NaiveDateTime and Local timezone to avoid deprecation
+                        let modified_str = if let Ok(naive_dt) =
+                            NaiveDateTime::parse_from_str(date_part, "%d-%b-%Y %I-%M-%S %p")
+                        {
+                            match Local.from_local_datetime(&naive_dt) {
+                                chrono::LocalResult::Single(dt) => dt.to_rfc3339(),
+                                chrono::LocalResult::Ambiguous(dt1, _) => dt1.to_rfc3339(),
+                                chrono::LocalResult::None => {
+                                    // Fallback if conversion fails
+                                    let main_file_path =
+                                        path.join(format!("gamesave_{}.sav", game_number));
+                                    if let Ok(meta) = fs::metadata(&main_file_path) {
+                                        let m: DateTime<Local> = meta
+                                            .modified()
+                                            .unwrap_or(SystemTime::UNIX_EPOCH)
+                                            .into();
+                                        m.to_rfc3339()
+                                    } else {
+                                        let dt: DateTime<Local> = SystemTime::UNIX_EPOCH.into();
+                                        dt.to_rfc3339()
+                                    }
+                                }
+                            }
+                        } else {
+                            // Fallback to file metadata if parsing fails
+                            let main_file_path = path.join(format!("gamesave_{}.sav", game_number));
+                            if let Ok(meta) = fs::metadata(&main_file_path) {
+                                let m: DateTime<Local> =
+                                    meta.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
+                                m.to_rfc3339()
+                            } else {
+                                // Default to epoch if all else fails
+                                let dt: DateTime<Local> = SystemTime::UNIX_EPOCH.into();
+                                dt.to_rfc3339()
+                            }
+                        };
+
+                        // We still need file size from the actual file
+                        let main_filename = format!("gamesave_{}.sav", game_number);
+                        let main_file_path = path.join(&main_filename);
+                        let size = if main_file_path.exists() {
+                            fs::metadata(&main_file_path).map(|m| m.len()).unwrap_or(0)
+                        } else {
+                            0
+                        };
+
+                        if main_file_path.exists() {
+                            backups.push(BackupInfo {
+                                path: path.to_string_lossy().to_string(),
+                                filename: folder_name,
+                                original_filename: main_filename,
+                                original_path: save_dir
+                                    .join(format!("gamesave_{}.sav", game_number))
+                                    .to_string_lossy()
+                                    .to_string(),
+                                size,
+                                modified: modified_str,
+                                game_number,
+                            });
+                        }
+                    }
                 }
             }
-
-            let metadata = entry.metadata().map_err(|e| e.to_string())?;
-            let modified: DateTime<Local> =
-                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
-
-            // Calculate original path
-            let original_path = if is_file_mode {
-                config_path.to_path_buf()
-            } else {
-                config_path.join(&original_filename)
-            };
-
-            raw_backups.push(RawBackupEntry {
-                path,
-                filename,
-                original_filename,
-                original_path: original_path.to_string_lossy().into_owned(),
-                size: metadata.len(),
-                modified,
-            });
         }
     }
 
-    // Sort by modified desc using the DateTime object
-    raw_backups.sort_by(|a, b| b.modified.cmp(&a.modified));
-
-    // Convert to BackupInfo
-    let backups = raw_backups
-        .into_iter()
-        .map(|entry| BackupInfo {
-            path: entry.path.to_string_lossy().into_owned(),
-            filename: entry.filename,
-            original_filename: entry.original_filename,
-            original_path: entry.original_path,
-            size: entry.size,
-            modified: entry.modified.to_rfc3339(),
-        })
-        .collect();
+    // Sort by modified desc
+    backups.sort_by(|a, b| b.modified.cmp(&a.modified));
 
     Ok(backups)
 }
 
-/// Derives the original filename from a backup filename by stripping the timestamp suffix.
-///
-/// Expected backup format: `{original_stem}_{timestamp}.{ext}`
-/// where timestamp is `%Y-%m-%d_%H-%M-%S_%3f` (23 chars).
-///
-/// If the filename is shorter than expected or doesn't follow the pattern, returns the backup filename itself.
-fn derive_original_filename(backup_path: &Path) -> String {
-    let stem = backup_path
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy();
-    let extension = backup_path
-        .extension()
-        .unwrap_or_default()
-        .to_string_lossy();
-
-    let stem_str = stem.as_ref();
-    if stem_str.len() > TIMESTAMP_SUFFIX_LEN {
-        let original_stem = &stem_str[..stem_str.len() - TIMESTAMP_SUFFIX_LEN];
-        if extension.is_empty() {
-            original_stem.to_string()
-        } else {
-            format!("{}.{}", original_stem, extension)
-        }
-    } else {
-        // Fallback if format doesn't match expected length
-        if extension.is_empty() {
-            stem.to_string()
-        } else {
-            format!("{}.{}", stem, extension)
-        }
-    }
-}
-
-/// Restores a backup file to the target location.
+/// Restores a backup folder to the save directory.
+/// Copies gamesave_{n}.sav and gamesave_{n}.sav.bak from backup folder to target dir.
 ///
 /// # Arguments
 ///
-/// * `backup_path` - The path to the backup file.
-/// * `target_path` - The path where the file should be restored to.
-pub fn restore_backup(backup_path: &Path, target_path: &Path) -> Result<(), String> {
-    if !backup_path.exists() {
-        return Err("Backup file does not exist".to_string());
+/// * `backup_folder_path` - The path to the specific backup folder.
+/// * `target_save_dir` - The directory to restore files into.
+pub fn restore_backup(backup_folder_path: &Path, target_save_dir: &Path) -> Result<(), String> {
+    if !backup_folder_path.exists() {
+        return Err("Backup folder does not exist".to_string());
+    }
+    if !target_save_dir.exists() {
+        return Err("Target save directory does not exist".to_string());
     }
 
-    // Ensure target parent exists
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let mut restored_any = false;
+
+    for entry in fs::read_dir(backup_folder_path).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(_info) = filename_utils::parse_path(&path) {
+                // It is a valid save file or bak
+                let file_name = path.file_name().unwrap();
+                let target_file = target_save_dir.join(file_name);
+
+                fs::copy(&path, &target_file).map_err(|e| e.to_string())?;
+                restored_any = true;
+            }
+        }
     }
 
-    // Copy (overwrite)
-    fs::copy(backup_path, target_path).map_err(|e| e.to_string())?;
-    log::info!("Restored {:?} to {:?}", backup_path, target_path);
+    if restored_any {
+        log::info!(
+            "Restored backup from {:?} to {:?}",
+            backup_folder_path,
+            target_save_dir
+        );
+        Ok(())
+    } else {
+        Err("No valid save files found in backup folder to restore".to_string())
+    }
+}
 
-    Ok(())
+/// Calculates the SHA-256 hash of a file.
+fn calculate_hash(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    io::copy(&mut file, &mut hasher).map_err(|e| e.to_string())?;
+    let hash = hasher.finalize();
+    Ok(format!("{:x}", hash))
 }
 
 #[cfg(test)]
@@ -293,160 +306,131 @@ mod tests {
     use super::*;
     use std::fs::File;
     use std::io::Write;
-    use std::thread;
-    use std::time::Duration;
     use tempfile::tempdir;
 
-    /// Tests that a backup is correctly created in the .backups subdirectory with a timestamped name.
+    /// Tests the complete backup flow including folder creation, deduplication, and file copying.
     #[test]
-    fn test_perform_backup() {
+    fn test_backup_flow() {
         let dir = tempdir().unwrap();
-        let source_path = dir.path().join("savegame.sav");
-        let mut file = File::create(&source_path).unwrap();
-        writeln!(file, "dummy content").unwrap();
+        let save_dir = dir.path();
+        let game_number = 1; // Internal 1 -> Display "Game 2"
 
-        let backup_path = perform_backup(&source_path).unwrap();
-
-        assert!(backup_path.exists());
-        assert_eq!(
-            backup_path.parent().unwrap().file_name().unwrap(),
-            ".backups"
-        );
-        assert!(backup_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("savegame_"));
-    }
-
-    /// Tests that the pruning logic correctly removes older backups, keeping only the specified retention count.
-    #[test]
-    fn test_prune_backups() {
-        let dir = tempdir().unwrap();
-        let backup_dir = dir.path().join(".backups");
-        fs::create_dir_all(&backup_dir).unwrap();
-
-        // Create 5 dummy backup files with different timestamps (simulated by sleep)
-        for i in 0..5 {
-            let p = backup_dir.join(format!("backup_{}.sav", i));
-            File::create(&p).unwrap();
-            thread::sleep(Duration::from_millis(100));
+        let main_sav = save_dir.join("gamesave_1.sav");
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "save data").unwrap();
         }
 
-        // We have 5 files. Keep 2.
-        let deleted = prune_backups(&backup_dir, 2).unwrap();
-        assert_eq!(deleted, 3);
+        // 1. Perform backup
+        let result = perform_backup_for_game(save_dir, game_number).unwrap();
+        assert!(result.is_some());
+        let backup_folder = result.unwrap();
 
-        let remaining = fs::read_dir(&backup_dir).unwrap().count();
-        assert_eq!(remaining, 2);
+        assert!(backup_folder.exists());
+        // Verify naming: "Game 2 - ..."
+        let folder_name = backup_folder.file_name().unwrap().to_string_lossy();
+        assert!(folder_name.starts_with("Game 2 -"));
+
+        assert!(backup_folder.join("gamesave_1.sav").exists());
+        assert!(backup_folder.join(".hash").exists());
+
+        // 2. Perform duplicate backup (should skip)
+        let result_dup = perform_backup_for_game(save_dir, game_number).unwrap();
+        assert!(result_dup.is_none());
+
+        // 3. Modify save and backup (should succeed)
+        // Sleep to ensure timestamp changes (folder name resolution is seconds)
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "new data").unwrap();
+        }
+        let result_new = perform_backup_for_game(save_dir, game_number).unwrap();
+        assert!(result_new.is_some());
+        assert_ne!(result_new.unwrap(), backup_folder); // Different timestamp folder
+
+        // 4. List backups
+        let backups = get_backups(save_dir).unwrap();
+        assert_eq!(backups.len(), 2);
+        assert_eq!(backups[0].game_number, 1);
+        // Verify folder name logic in listing
+        assert!(backups[0].filename.starts_with("Game 2 -"));
     }
 
+    /// Tests that backup is skipped if only the .bak file exists.
     #[test]
-    fn test_get_and_restore_backup() {
+    fn test_skip_if_only_bak() {
         let dir = tempdir().unwrap();
-        let source_path = dir.path().join("save.sav");
+        let save_dir = dir.path();
+        let game_number = 0;
+
+        let bak_sav = save_dir.join("gamesave_0.sav.bak");
+        File::create(&bak_sav).unwrap();
+
+        let result = perform_backup_for_game(save_dir, game_number).unwrap();
+        assert!(result.is_none());
+    }
+
+    /// Tests the restore functionality.
+    #[test]
+    fn test_restore() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 2;
+
+        let main_sav = save_dir.join("gamesave_2.sav");
+        let bak_sav = save_dir.join("gamesave_2.sav.bak");
+
         {
-            let mut f = File::create(&source_path).unwrap();
+            let mut f = File::create(&main_sav).unwrap();
             writeln!(f, "original").unwrap();
+            let mut f2 = File::create(&bak_sav).unwrap();
+            writeln!(f2, "original bak").unwrap();
         }
 
-        // Make a backup
-        let backup_path = perform_backup(&source_path).unwrap();
+        // Backup
+        let backup_folder = perform_backup_for_game(save_dir, game_number)
+            .unwrap()
+            .unwrap();
 
-        // List backups
-        let backups = get_backups(dir.path()).unwrap(); // using dir path
-        assert_eq!(backups.len(), 1);
-        assert_eq!(backups[0].path, backup_path.to_string_lossy());
-
-        // Modify source
+        // Modify
         {
-            let mut f = File::create(&source_path).unwrap();
-            writeln!(f, "modified").unwrap();
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "corrupted").unwrap();
         }
 
         // Restore
-        restore_backup(&PathBuf::from(&backups[0].path), &source_path).unwrap();
+        restore_backup(&backup_folder, save_dir).unwrap();
 
-        // Check content
-        let content = fs::read_to_string(&source_path).unwrap();
+        let content = fs::read_to_string(&main_sav).unwrap();
         assert_eq!(content.trim(), "original");
+
+        let content_bak = fs::read_to_string(&bak_sav).unwrap();
+        assert_eq!(content_bak.trim(), "original bak");
     }
 
+    /// Tests that the hash file contains only the hex digest.
     #[test]
-    fn test_derive_original_filename() {
-        // Mock path logic using PathBuf
-        let p = PathBuf::from("savegame_2026-01-23_14-05-01_123.sav");
-        assert_eq!(derive_original_filename(&p), "savegame.sav");
-
-        let p2 = PathBuf::from("my_save_2026-01-23_14-05-01_123.sav");
-        assert_eq!(derive_original_filename(&p2), "my_save.sav");
-
-        let p3 = PathBuf::from("short.sav");
-        assert_eq!(derive_original_filename(&p3), "short.sav");
-    }
-
-    #[test]
-    fn test_get_backups_filtering() {
+    fn test_hash_content() {
         let dir = tempdir().unwrap();
-        let source_path = dir.path().join("save.sav");
-        let unrelated_path = dir.path().join("save_other.sav"); // Prefix collision candidate
+        let save_dir = dir.path();
+        let game_number = 5;
+        let main_sav = save_dir.join("gamesave_5.sav");
 
         {
-            File::create(&source_path).unwrap();
-            File::create(&unrelated_path).unwrap();
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "hash test").unwrap();
         }
 
-        let backup1 = perform_backup(&source_path).unwrap();
-        let backup2 = perform_backup(&unrelated_path).unwrap();
+        let backup_folder = perform_backup_for_game(save_dir, game_number)
+            .unwrap()
+            .unwrap();
+        let hash_file = backup_folder.join(".hash");
 
-        // Get backups strictly for "save.sav"
-        let backups = get_backups(&source_path).unwrap();
-        assert_eq!(backups.len(), 1);
-        assert_eq!(backups[0].path, backup1.to_string_lossy());
-
-        // Get backups strictly for "save_other.sav"
-        let backups_other = get_backups(&unrelated_path).unwrap();
-        assert_eq!(backups_other.len(), 1);
-        assert_eq!(backups_other[0].path, backup2.to_string_lossy());
-    }
-
-    #[test]
-    fn test_get_backups_missing_file_heuristic() {
-        let dir = tempdir().unwrap();
-
-        // Case 1: Missing file with .sav extension -> Should be treated as file
-        // Expected behavior: Look in parent/.backups
-        let missing_file = dir.path().join("missing_save.sav");
-        let backup_dir_for_file = dir.path().join(".backups");
-        fs::create_dir_all(&backup_dir_for_file).unwrap();
-
-        // Create a dummy backup that matches the missing file pattern
-        let timestamp = Local::now().format(TIMESTAMP_FORMAT);
-        let backup_name = format!("missing_save_{}.sav", timestamp);
-        let backup_path = backup_dir_for_file.join(&backup_name);
-        File::create(&backup_path).unwrap();
-
-        let backups = get_backups(&missing_file).unwrap();
-        assert_eq!(backups.len(), 1, "Should find backup for missing .sav file");
-        assert_eq!(backups[0].filename, backup_name);
-
-        // Case 2: Missing path without .sav extension -> Should be treated as directory
-        // Expected behavior: Look in path/.backups
-        let missing_dir = dir.path().join("missing_dir");
-        let backup_dir_for_dir = missing_dir.join(".backups");
-        fs::create_dir_all(&backup_dir_for_dir).unwrap(); // create the backup dir structure
-
-        // Create a dummy backup inside this directory structure
-        let dir_backup_name = format!("save_{}.sav", timestamp);
-        let dir_backup_path = backup_dir_for_dir.join(&dir_backup_name);
-        File::create(&dir_backup_path).unwrap();
-
-        let backups_dir = get_backups(&missing_dir).unwrap();
-        assert_eq!(
-            backups_dir.len(),
-            1,
-            "Should find backup for directory mode"
-        );
-        assert_eq!(backups_dir[0].filename, dir_backup_name);
+        let content = fs::read_to_string(hash_file).unwrap();
+        // Hex digest of "hash test\n" (on linux/mac) or "hash test\r\n" (windows)
+        // Just verify it's a hex string.
+        assert!(content.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(!content.contains("Sha256")); // Should not contain struct debug info
     }
 }

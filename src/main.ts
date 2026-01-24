@@ -16,6 +16,7 @@ interface BackupInfo {
   original_path: string;
   size: number;
   modified: string;
+  game_number: number;
 }
 
 /**
@@ -321,8 +322,8 @@ async function loadBackups(): Promise<void> {
  * Restores a backup.
  */
 async function restoreBackup(backup: BackupInfo): Promise<void> {
-  let message = `Are you sure you want to restore "${backup.original_filename}" from ${formatDate(backup.modified)}?`;
-  message += `\nThis will overwrite the current save file.`;
+  let message = `Are you sure you want to restore "${backup.original_filename}" (Game ${backup.game_number + 1}) from ${formatDate(backup.modified)}?`;
+  message += `\nThis will overwrite the current save files for Game ${backup.game_number + 1}.`;
 
   const isCloud = await safeInvoke<boolean>(
     'check_steam_cloud_path',
@@ -401,6 +402,7 @@ async function loadConfig(): Promise<void> {
       setConfigStatus('Configuration loaded.', 'info');
       void loadBackups();
     } else {
+      manualInput.value = '';
       setConfigStatus('No save path configured.', 'info');
     }
 
@@ -444,18 +446,23 @@ async function savePath(): Promise<void> {
       return;
     }
 
-    const result = await safeInvoke(
+    const normalizedPath = await safeInvoke<string>(
       'set_save_path',
       { path },
       {
         actionName: 'save path',
-        onError: () => setConfigStatus('Error saving path.', 'error'),
+        onError: () => {
+          setConfigStatus('Error saving path.', 'error');
+          // Reload config to reflect potential clearing of save_path by backend (auto-backup disabled)
+          void loadConfig();
+        },
       },
     );
 
-    if (result !== undefined) {
+    if (normalizedPath) {
+      manualInput.value = normalizedPath;
       setConfigStatus('Save path updated successfully.', 'success');
-      logActivity(`Save path updated: ${path}`);
+      logActivity(`Save path updated: ${normalizedPath}`);
       void loadBackups();
     }
   } finally {

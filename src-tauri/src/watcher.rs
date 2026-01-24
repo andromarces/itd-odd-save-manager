@@ -1,6 +1,7 @@
 // ITD ODD Save Manager by andromarces
 
-use crate::backup::{perform_backup, prune_backups};
+use crate::backup::perform_backup_for_game;
+use crate::filename_utils;
 use log::{error, info};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
@@ -12,8 +13,8 @@ use std::time::Duration;
 
 // Default debounce duration to coalesce rapid writes
 const DEBOUNCE_DURATION: Duration = Duration::from_secs(2);
-const MAX_BACKUPS: usize = 50;
 
+/// Watches for file system changes in the save directory.
 #[derive(Clone)]
 pub struct FileWatcher {
     watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
@@ -29,10 +30,9 @@ impl FileWatcher {
         }
     }
 
-    /// Starts watching the specified path (file or directory).
+    /// Starts watching the specified path.
     ///
-    /// If `path` is a file, watches its parent directory and filters for changes to that specific file.
-    /// If `path` is a directory, watches the directory and filters for changes to any `.sav` files.
+    /// Expects a directory path usually, but handles file path by watching parent.
     ///
     /// # Arguments
     ///
@@ -45,26 +45,22 @@ impl FileWatcher {
 
         // Init watcher
         let mut watcher = notify::recommended_watcher(move |res| {
-            // We ignore send errors because if the channel is closed, the watcher is stopping anyway
             let _ = tx.send(res);
         })
         .map_err(|e| e.to_string())?;
 
-        // Determine what to watch
-        // We use the same heuristic as get_backups to handle missing files (e.g. before first save)
-        let is_watching_file = if path.exists() {
-            path.is_file()
-        } else {
-            path.extension()
-                .map(|ext| ext.to_string_lossy().eq_ignore_ascii_case("sav"))
-                .unwrap_or(false)
-        };
+        let is_file_input = path.is_file();
 
-        let watch_target = if is_watching_file {
+        // We always watch the directory
+        let watch_target = if is_file_input {
             path.parent().ok_or("Invalid file path")?.to_path_buf()
         } else {
             path.clone()
         };
+
+        if !watch_target.exists() {
+            return Err(format!("Watch target does not exist: {:?}", watch_target));
+        }
 
         // Watch non-recursively
         if let Err(e) = watcher.watch(&watch_target, RecursiveMode::NonRecursive) {
@@ -76,9 +72,8 @@ impl FileWatcher {
         *self.current_path.lock().unwrap() = Some(path.clone());
 
         // Spawn debouncing thread
-        let path_clone = path.clone();
         thread::spawn(move || {
-            debounce_loop(rx, path_clone, is_watching_file);
+            debounce_loop(rx, watch_target);
         });
 
         info!("Started watching: {:?}", path);
@@ -89,7 +84,6 @@ impl FileWatcher {
     pub fn stop(&self) {
         let mut watcher_guard = self.watcher.lock().unwrap();
         if watcher_guard.is_some() {
-            // Dropping the watcher stops it.
             *watcher_guard = None;
             *self.current_path.lock().unwrap() = None;
             info!("Stopped watching");
@@ -99,24 +93,32 @@ impl FileWatcher {
 
 /// Runs the debounce loop to process file system events.
 ///
-/// Coalesces rapid events and triggers backups for changed files.
+/// It performs an initial scan for existing save files and then listens for
+/// file system events, aggregating them to trigger backups.
 ///
 /// # Arguments
 ///
-/// * `rx` - The receiver channel for notify events.
-/// * `target_path` - The user-configured path (file or directory).
-/// * `is_watching_file` - True if `target_path` refers to a specific file, False if it's a directory.
-fn debounce_loop(
-    rx: Receiver<notify::Result<notify::Event>>,
-    target_path: PathBuf,
-    is_watching_file: bool,
-) {
-    // Only initialize the HashSet if we are watching a directory
-    let mut pending_files: Option<HashSet<PathBuf>> = if is_watching_file {
-        None
-    } else {
-        Some(HashSet::new())
-    };
+/// * `rx` - Receiver for file system events.
+/// * `save_dir` - The directory being watched.
+fn debounce_loop(rx: Receiver<notify::Result<notify::Event>>, save_dir: PathBuf) {
+    // Initial Scan: Check for existing saves that need backup
+    info!("Performing initial scan of {:?}", save_dir);
+    if let Ok(entries) = std::fs::read_dir(&save_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // We only care about main save files for the trigger,
+            // perform_backup_for_game handles the rest.
+            if let Some(info) = filename_utils::parse_path(&path) {
+                if !info.is_bak {
+                    if let Err(e) = perform_backup_for_game(&save_dir, info.game_number) {
+                        error!("Initial backup failed for game {}: {}", info.game_number, e);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut pending_games: HashSet<u32> = HashSet::new();
     let mut last_change_time = std::time::Instant::now();
     let mut pending_change = false;
 
@@ -126,31 +128,18 @@ fn debounce_loop(
             let elapsed = last_change_time.elapsed();
             if elapsed >= DEBOUNCE_DURATION {
                 // Trigger Backups
-                if is_watching_file {
-                    info!("Debounce timeout reached. Backing up 1 file.");
-                    if let Err(e) = perform_backup(&target_path) {
-                        error!("Backup failed for {:?}: {}", target_path, e);
-                    } else if let Some(parent) = target_path.parent() {
-                        let backup_dir = parent.join(".backups");
-                        let _ = prune_backups(&backup_dir, MAX_BACKUPS);
-                    }
-                } else if let Some(files) = &mut pending_files {
-                    info!(
-                        "Debounce timeout reached. Backing up {} files.",
-                        files.len()
-                    );
+                info!(
+                    "Debounce timeout. Backing up {} games.",
+                    pending_games.len()
+                );
 
-                    for file_path in files.iter() {
-                        if let Err(e) = perform_backup(file_path) {
-                            error!("Backup failed for {:?}: {}", file_path, e);
-                        } else if let Some(parent) = file_path.parent() {
-                            let backup_dir = parent.join(".backups");
-                            let _ = prune_backups(&backup_dir, MAX_BACKUPS);
-                        }
+                for game_number in pending_games.iter() {
+                    if let Err(e) = perform_backup_for_game(&save_dir, *game_number) {
+                        error!("Backup failed for game {}: {}", game_number, e);
                     }
-                    files.clear();
                 }
 
+                pending_games.clear();
                 pending_change = false;
                 Duration::from_secs(60) // Idle wait
             } else {
@@ -163,40 +152,22 @@ fn debounce_loop(
         match rx.recv_timeout(timeout) {
             Ok(Ok(event)) => {
                 // Check for relevance
+                let mut relevant_event = false;
                 for path in event.paths {
-                    let is_relevant = if is_watching_file {
-                        // If watching a specific file, only that file is relevant (case-insensitive)
-                        path.file_name().map(|s| s.to_string_lossy().to_lowercase())
-                            == target_path
-                                .file_name()
-                                .map(|s| s.to_string_lossy().to_lowercase())
-                    } else {
-                        // If watching a directory, any .sav file is relevant (case-insensitive)
-                        path.extension()
-                            .is_some_and(|ext| ext.to_string_lossy().to_lowercase() == "sav")
-                    };
-
-                    if is_relevant {
-                        match event.kind {
-                            notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
-                                // If target is a file, we rely on pending_change flag and target_path
-                                // If target is a dir, we track the specific file that changed
-                                if !is_watching_file {
-                                    if let Some(files) = &mut pending_files {
-                                        files.insert(path.clone());
-                                    }
-                                }
-                                pending_change = true;
-                                last_change_time = std::time::Instant::now();
-                            }
-                            _ => {}
-                        }
+                    if let Some(info) = filename_utils::parse_path(&path) {
+                        pending_games.insert(info.game_number);
+                        relevant_event = true;
                     }
+                }
+
+                if relevant_event {
+                    pending_change = true;
+                    last_change_time = std::time::Instant::now();
                 }
             }
             Ok(Err(e)) => error!("Watch error: {:?}", e),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                // Loop continues, processing pending backups if any
+                // Loop continues
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 break;
@@ -208,103 +179,30 @@ fn debounce_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
     use tempfile::tempdir;
 
-    /// Tests that a new FileWatcher is initialized with no active watcher or path.
+    /// Tests that the watcher starts and stops without error.
     #[test]
-    fn test_file_watcher_initialization() {
+    fn test_file_watcher_lifecycle() {
         let watcher = FileWatcher::new();
-        assert!(watcher.watcher.lock().unwrap().is_none());
-    }
-
-    /// Tests the lifecycle of starting and stopping the watcher.
-    #[test]
-    fn test_file_watcher_start_stop() {
-        let watcher = FileWatcher::new();
-        let temp_dir = tempdir().unwrap();
-        let file_path = temp_dir.path().join("test.sav");
-        File::create(&file_path).unwrap();
-
-        assert!(watcher.start(file_path.clone()).is_ok());
-        assert!(watcher.watcher.lock().unwrap().is_some());
-
+        let dir = tempdir().unwrap();
+        // Just verify it doesn't panic on start/stop
+        assert!(watcher.start(dir.path().to_path_buf()).is_ok());
         watcher.stop();
-        assert!(watcher.watcher.lock().unwrap().is_none());
     }
 
-    /// Tests the relevance logic for file watching mode, including case insensitivity.
+    /// Tests that only valid save filenames trigger the relevance logic.
     #[test]
-    fn test_is_relevant_logic_file() {
-        // Logic extraction for testing without full notify integration
-        let target_path = PathBuf::from("C:\\Games\\Save.sav");
-        let _is_watching_file = true;
+    fn test_debounce_filtering_logic() {
+        // Direct testing of the filtering logic used in debounce_loop
+        let path_valid = PathBuf::from("gamesave_1.sav");
+        let path_bak = PathBuf::from("gamesave_1.sav.bak");
+        let path_invalid = PathBuf::from("other.txt");
+        let path_invalid_fmt = PathBuf::from("gamesave_abc.sav");
 
-        // Exact match
-        let event_path = PathBuf::from("C:\\Games\\Save.sav");
-        let is_relevant = event_path
-            .file_name()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            == target_path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_lowercase());
-        assert!(is_relevant);
-
-        // Case difference
-        let event_path_case = PathBuf::from("C:\\Games\\save.sav");
-        let is_relevant_case = event_path_case
-            .file_name()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            == target_path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_lowercase());
-        assert!(is_relevant_case);
-
-        // Different file
-        let event_path_other = PathBuf::from("C:\\Games\\Other.sav");
-        let is_relevant_other = event_path_other
-            .file_name()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            == target_path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_lowercase());
-        assert!(!is_relevant_other);
-    }
-
-    /// Tests the relevance logic for directory watching mode, ensuring only .sav files are matched case-insensitively.
-    #[test]
-    fn test_is_relevant_logic_dir_case_insensitive() {
-        // Logic extraction for directory mode
-        let _target_path = PathBuf::from("C:\\Games\\");
-        let _is_watching_file = false;
-
-        let check = |p: &str| -> bool {
-            PathBuf::from(p)
-                .extension()
-                .is_some_and(|ext| ext.to_string_lossy().to_lowercase() == "sav")
-        };
-
-        assert!(check("save.sav"));
-        assert!(check("SAVE.SAV"));
-        assert!(check("Mixed.SaV"));
-        assert!(!check("image.png"));
-        assert!(!check("no_ext"));
-    }
-
-    /// Tests that the watcher correctly handles a non-existent file path if it has a .sav extension.
-    /// It should treat it as 'file mode' and watch the parent directory instead of failing.
-    #[test]
-    fn test_file_watcher_missing_file_heuristic() {
-        let watcher = FileWatcher::new();
-        let temp_dir = tempdir().unwrap();
-        // Path to a non-existent file
-        let missing_file_path = temp_dir.path().join("future_save.sav");
-
-        // Should succeed because it detects .sav extension, treats as file mode,
-        // and watches the parent directory (which exists).
-        assert!(watcher.start(missing_file_path).is_ok());
-
-        // Cleanup
-        watcher.stop();
+        assert!(filename_utils::parse_path(&path_valid).is_some());
+        assert!(filename_utils::parse_path(&path_bak).is_some());
+        assert!(filename_utils::parse_path(&path_invalid).is_none());
+        assert!(filename_utils::parse_path(&path_invalid_fmt).is_none());
     }
 }

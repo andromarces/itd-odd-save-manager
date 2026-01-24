@@ -2,6 +2,7 @@
 
 mod backup;
 mod config;
+pub mod filename_utils;
 mod game_manager;
 mod save_paths;
 mod watcher;
@@ -39,7 +40,16 @@ fn get_backups_command(state: tauri::State<ConfigState>) -> Result<Vec<BackupInf
 fn restore_backup_command(backup_path: String, target_path: String) -> Result<(), String> {
     let backup = PathBuf::from(backup_path);
     let target = PathBuf::from(target_path);
-    backup::restore_backup(&backup, &target)
+
+    // The backup::restore_backup function expects a target DIRECTORY.
+    // If target_path points to a file (e.g. gamesave_0.sav), we use its parent.
+    let target_dir = if target.extension().is_some() {
+        target.parent().ok_or("Invalid target path")?.to_path_buf()
+    } else {
+        target
+    };
+
+    backup::restore_backup(&backup, &target_dir)
 }
 
 /// Helper to show and focus the main window.
