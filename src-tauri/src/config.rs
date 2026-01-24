@@ -26,8 +26,22 @@ pub struct ConfigState(pub Mutex<AppConfig>);
 /// Resolves the path to the configuration file.
 fn get_config_path() -> PathBuf {
     std::env::current_exe()
-        .map(|p| p.parent().unwrap_or(Path::new(".")).join("config.json"))
+        .map(|p| config_path_for_exe(&p))
         .unwrap_or_else(|_| PathBuf::from("config.json"))
+}
+
+/// Derives the configuration file path from an executable path.
+fn config_path_for_exe(exe_path: &Path) -> PathBuf {
+    let config_name = exe_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| format!("{stem}.config.json"))
+        .unwrap_or_else(|| "config.json".to_string());
+
+    exe_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(config_name)
 }
 
 /// Loads configuration from a specific file path.
@@ -249,5 +263,19 @@ mod tests {
         assert!(loaded.save_path.is_none());
         assert!(!loaded.auto_launch_game);
         assert!(!loaded.auto_close);
+    }
+
+    /// Tests that the config path mirrors the executable name.
+    #[test]
+    fn test_config_path_for_exe_mirrors_name() {
+        let exe_path = PathBuf::from("C:/Apps/ITD ODD Save Manager.exe");
+        let expected = exe_path
+            .parent()
+            .expect("missing parent")
+            .join("ITD ODD Save Manager.config.json");
+
+        let resolved = config_path_for_exe(&exe_path);
+
+        assert_eq!(resolved, expected);
     }
 }
