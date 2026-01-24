@@ -20,7 +20,7 @@ use watcher::FileWatcher;
 struct TrayState(#[allow(dead_code)] tauri::tray::TrayIcon);
 
 /// Tauri command to list available backups for the configured save path.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn get_backups_command(state: tauri::State<ConfigState>) -> Result<Vec<BackupInfo>, String> {
     let config = state
         .0
@@ -35,7 +35,7 @@ fn get_backups_command(state: tauri::State<ConfigState>) -> Result<Vec<BackupInf
 }
 
 /// Tauri command to restore a specific backup to a target location.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn restore_backup_command(backup_path: String, target_path: String) -> Result<(), String> {
     let backup = PathBuf::from(backup_path);
     let target = PathBuf::from(target_path);

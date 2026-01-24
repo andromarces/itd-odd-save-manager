@@ -14,7 +14,7 @@ const GAME_APP_ID: &str = "2239710";
 const PROCESS_NAME_PART: &str = "intothedead"; // Lowercase match
 
 /// Initiates game launch via Steam protocol.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn launch_game<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     log::info!("Launching game via Steam...");
     match app

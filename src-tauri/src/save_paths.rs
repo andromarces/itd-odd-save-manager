@@ -59,7 +59,7 @@ pub(crate) fn find_steam_save_dirs(steam_root: &Path) -> Vec<PathBuf> {
 }
 
 /// Detects Steam save directories for the game and returns them as strings.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn detect_steam_save_paths() -> Vec<String> {
     log::info!("Steam save detection started");
 
@@ -104,7 +104,7 @@ pub(crate) fn is_steam_cloud_path(path: &Path) -> bool {
 }
 
 /// Tauri command to check if the provided path is a Steam Cloud path.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn check_steam_cloud_path(path: String) -> bool {
     is_steam_cloud_path(Path::new(&path))
 }

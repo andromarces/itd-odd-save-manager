@@ -66,10 +66,14 @@ The application automatically detects if your save files are located within the 
 ### Build
 
 - Run `npm run dev` for development.
-- Run `npm run build` to create the production executable.
-- The compiled executable will be located in:
-  - `src-tauri/target/release/ITD ODD Save Manager.exe` (Windows)
-  - This file is portable and can be moved/run from anywhere.
+- Run `npm run build` to build the frontend only.
+- Run `npx tauri build` to create the production executable and installers.
+- The compiled executable will be located at:
+  - `src-tauri/target/release/app.exe` (Windows)
+  - This file is portable and can be moved and run from anywhere.
+- Installers will be located at:
+  - `src-tauri/target/release/bundle/msi/ITD ODD Save Manager_0.1.0_x64_en-US.msi`
+  - `src-tauri/target/release/bundle/nsis/ITD ODD Save Manager_0.1.0_x64-setup.exe`
 
 ## License & Attribution
 

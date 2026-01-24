@@ -61,7 +61,7 @@ fn is_valid_path(path: &str) -> bool {
 }
 
 /// Retrieves the current application configuration.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn get_config(state: State<ConfigState>) -> Result<AppConfig, String> {
     log::info!("Retrieving configuration");
     state.0.lock().map(|config| config.clone()).map_err(|e| {
@@ -90,7 +90,7 @@ where
 }
 
 /// Sets the save path in the configuration, persists it, and updates the watcher.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn set_save_path(
     config_state: State<ConfigState>,
     watcher: State<FileWatcher>,
@@ -122,7 +122,7 @@ pub fn set_save_path(
 }
 
 /// Sets the game launch and auto-close settings.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn set_game_settings(
     config_state: State<ConfigState>,
     auto_launch_game: bool,
@@ -158,7 +158,7 @@ fn save_config(config: &AppConfig) -> Result<(), String> {
 }
 
 /// Checks if a path is valid.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn validate_path(path: String) -> bool {
     let is_valid = is_valid_path(&path);
     log::info!("Validating path '{}': {}", path, is_valid);
