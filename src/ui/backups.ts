@@ -7,6 +7,7 @@ type BackupsElements = Pick<
   | 'manualInput'
   | 'refreshBackupsButton'
   | 'backupsTable'
+  | 'backupsList'
   | 'masterDeleteButton'
   | 'masterDeleteDialog'
   | 'masterDeleteForm'
@@ -62,22 +63,14 @@ export function createBackupsFeature(
    * Renders the list of backups into the table body.
    */
   function renderBackups(backups: BackupInfo[]): void {
-    // Clear existing bodies
-    while (elements.backupsTable.tBodies.length > 0) {
-      elements.backupsTable.removeChild(elements.backupsTable.tBodies[0]);
-    }
-
     if (backups.length === 0) {
-      const tbody = document.createElement('tbody');
-      tbody.innerHTML =
+      elements.backupsList.innerHTML =
         '<tr><td colspan="3" class="empty">No backups found.</td></tr>';
-      elements.backupsTable.appendChild(tbody);
       return;
     }
 
     const fragment = document.createDocumentFragment();
     backups.forEach((backup, index) => {
-      const tbody = document.createElement('tbody');
       const row = document.createElement('tr');
 
       const fileCell = document.createElement('td');
@@ -128,7 +121,7 @@ export function createBackupsFeature(
       row.appendChild(fileCell);
       row.appendChild(dateCell);
       row.appendChild(actionCell);
-      tbody.appendChild(row);
+      fragment.appendChild(row);
 
       if (backup.note) {
         const noteRow = document.createElement('tr');
@@ -138,12 +131,11 @@ export function createBackupsFeature(
         noteCell.textContent = backup.note;
         noteCell.title = backup.note;
         noteRow.appendChild(noteCell);
-        tbody.appendChild(noteRow);
+        fragment.appendChild(noteRow);
       }
-
-      fragment.appendChild(tbody);
     });
-    elements.backupsTable.appendChild(fragment);
+
+    elements.backupsList.replaceChildren(fragment);
   }
 
   /**
@@ -161,14 +153,8 @@ export function createBackupsFeature(
       {
         actionName: 'load backups',
         onError: () => {
-          // Fallback for error state
-          while (elements.backupsTable.tBodies.length > 0) {
-            elements.backupsTable.removeChild(elements.backupsTable.tBodies[0]);
-          }
-          const tbody = document.createElement('tbody');
-          tbody.innerHTML =
+          elements.backupsList.innerHTML =
             '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
-          elements.backupsTable.appendChild(tbody);
         },
       },
     );
@@ -187,7 +173,7 @@ export function createBackupsFeature(
    * Toggles the lock status of a backup.
    */
   async function toggleBackupLock(backup: BackupInfo): Promise<void> {
-    await safeInvoke(
+    const success = await safeInvoke(
       'toggle_backup_lock_command',
       {
         backup_path: backup.path,
@@ -199,7 +185,11 @@ export function createBackupsFeature(
           logActivity(`Failed to toggle lock for ${backup.filename}`),
       },
     );
-    await loadBackups();
+
+    if (success !== undefined) {
+      backup.locked = !backup.locked;
+      renderBackups(currentBackups);
+    }
   }
 
   /**
@@ -210,7 +200,7 @@ export function createBackupsFeature(
     const newNote = window.prompt('Enter note for this backup:', currentNote);
     if (newNote === null) return; // Cancelled
 
-    await safeInvoke(
+    const success = await safeInvoke(
       'set_backup_note_command',
       {
         backup_filename: backup.filename,
@@ -221,7 +211,11 @@ export function createBackupsFeature(
         onError: () => logActivity(`Failed to set note for ${backup.filename}`),
       },
     );
-    await loadBackups();
+
+    if (success !== undefined) {
+      backup.note = newNote.trim() || null;
+      renderBackups(currentBackups);
+    }
   }
 
   /**
@@ -235,7 +229,7 @@ export function createBackupsFeature(
     );
     if (!confirmed) return;
 
-    await safeInvoke(
+    const success = await safeInvoke(
       'delete_backup_command',
       {
         backup_path: backup.path,
@@ -246,7 +240,14 @@ export function createBackupsFeature(
         onError: () => logActivity(`Failed to delete ${backup.filename}`),
       },
     );
-    await loadBackups();
+
+    if (success !== undefined) {
+      const index = currentBackups.indexOf(backup);
+      if (index > -1) {
+        currentBackups.splice(index, 1);
+        renderBackups(currentBackups);
+      }
+    }
   }
 
   /**

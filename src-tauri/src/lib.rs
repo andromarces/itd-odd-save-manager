@@ -77,7 +77,7 @@ async fn get_backups_command(
     state: tauri::State<'_, ConfigState>,
 ) -> Result<Vec<BackupInfo>, String> {
     if let Some(path) = extract_save_path(&state)? {
-        run_blocking(move || backup::get_backups(&path)).await
+        run_blocking(move || backup::get_backups(&path, false)).await
     } else {
         Ok(Vec::new())
     }

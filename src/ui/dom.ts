@@ -9,6 +9,7 @@ export interface AppElements {
   refreshBackupsButton: HTMLButtonElement;
   masterDeleteButton: HTMLButtonElement;
   backupsTable: HTMLTableElement;
+  backupsList: HTMLTableSectionElement;
   launchGameButton: HTMLButtonElement;
   autoLaunchCheck: HTMLInputElement;
   autoCloseCheck: HTMLInputElement;
@@ -181,6 +182,7 @@ export function renderAppShell(): AppElements {
     refreshBackupsButton: getElement<HTMLButtonElement>('#refresh-backups'),
     masterDeleteButton: getElement<HTMLButtonElement>('#master-delete-btn'),
     backupsTable: getElement<HTMLTableElement>('#backups-table'),
+    backupsList: getElement<HTMLTableSectionElement>('#backups-list'),
     launchGameButton: getElement<HTMLButtonElement>('#launch-game'),
     autoLaunchCheck: getElement<HTMLInputElement>('#auto-launch-check'),
     autoCloseCheck: getElement<HTMLInputElement>('#auto-close-check'),

@@ -1,9 +1,6 @@
 // ITD ODD Save Manager by andromarces
 
-use crate::backup::{
-    ensure_backup_root, load_index, perform_backup_for_game, perform_backup_for_game_internal,
-    save_index,
-};
+use crate::backup::{ensure_backup_root, load_index, perform_backup_for_game_internal, save_index};
 use crate::filename_utils;
 use log::{error, info};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -204,10 +201,20 @@ fn debounce_loop(
                     pending_games.len()
                 );
 
-                for game_number in pending_games.iter() {
-                    if let Err(e) = perform_backup_for_game(&save_dir, *game_number, limit) {
-                        error!("Backup failed for game {}: {}", game_number, e);
+                if let Ok(backup_root) = crate::backup::ensure_backup_root(&save_dir) {
+                    let mut index = crate::backup::load_index(&backup_root);
+                    for game_number in pending_games.iter() {
+                        if let Err(e) = perform_backup_for_game_internal(
+                            &save_dir,
+                            &backup_root,
+                            *game_number,
+                            &mut index,
+                            limit,
+                        ) {
+                            error!("Backup failed for game {}: {}", game_number, e);
+                        }
                     }
+                    crate::backup::save_index(&backup_root, &index);
                 }
 
                 pending_games.clear();
@@ -351,7 +358,7 @@ mod tests {
         assert!(index_path.exists());
 
         // Verify that backups were actually registered
-        let backups = crate::backup::get_backups(&save_dir).unwrap();
+        let backups = crate::backup::get_backups(&save_dir, true).unwrap();
         assert_eq!(backups.len(), 2);
 
         let games: std::collections::HashSet<u32> = backups.iter().map(|b| b.game_number).collect();

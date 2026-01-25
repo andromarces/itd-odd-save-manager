@@ -153,11 +153,10 @@ fn resolve_hash(
     Ok((hash, true))
 }
 
-/// Checks for duplicate backups and refreshes stale index metadata when safe.
-fn should_skip_duplicate(
+/// Checks if the current save matches the index metadata (fast deduplication).
+fn is_duplicate_by_index(
     index: &mut BackupIndex,
     backup_root: &Path,
-    save_dir: &Path,
     game_number: u32,
     hash: &str,
     calculated: bool,
@@ -180,7 +179,6 @@ fn should_skip_duplicate(
                             last_backup_path: entry.last_backup_path.clone(),
                         },
                     );
-                    // Disk write deferred to caller for batch optimization
                 }
 
                 log::info!(
@@ -196,32 +194,38 @@ fn should_skip_duplicate(
             );
         }
     }
+    false
+}
 
-    // Fallback: Check all existing backups for this game to prevent duplicates after restore
-    if let Ok(backups) = get_backups(save_dir) {
-        for backup in backups {
-            if backup.game_number == game_number && backup.hash == hash {
-                log::info!(
-                    "Duplicate backup found for game {} in existing backup {}, skipping.",
-                    game_number,
-                    backup.filename
-                );
+/// Checks if the current save matches any existing backup content (fallback deduplication).
+fn is_duplicate_by_content(
+    index: &mut BackupIndex,
+    game_number: u32,
+    hash: &str,
+    source: &SourceMetadata,
+    backups: &[BackupInfo],
+) -> bool {
+    for backup in backups {
+        if backup.game_number == game_number && backup.hash == hash {
+            log::info!(
+                "Duplicate backup found for game {} in existing backup {}, skipping.",
+                game_number,
+                backup.filename
+            );
 
-                // Update index to point to this backup for future fast-path metadata matches
-                index.games.insert(
-                    game_number,
-                    IndexEntry {
-                        last_hash: hash.to_string(),
-                        last_source_size: source.size,
-                        last_source_modified: source.modified_nanos,
-                        last_backup_path: backup.filename.clone(),
-                    },
-                );
-                return true;
-            }
+            // Update index to point to this backup for future fast-path metadata matches
+            index.games.insert(
+                game_number,
+                IndexEntry {
+                    last_hash: hash.to_string(),
+                    last_source_size: source.size,
+                    last_source_modified: source.modified_nanos,
+                    last_backup_path: backup.filename.clone(),
+                },
+            );
+            return true;
         }
     }
-
     false
 }
 
@@ -272,6 +276,7 @@ fn backup_info_from_folder(
     path: &Path,
     folder_name: &str,
     save_dir: &Path,
+    include_hash: bool,
 ) -> Result<Option<BackupInfo>, String> {
     let Some(info) = filename_utils::parse_backup_folder_name(folder_name) else {
         return Ok(None);
@@ -292,9 +297,13 @@ fn backup_info_from_folder(
         .len();
 
     let locked = path.join(LOCKED_FILE_NAME).exists();
-    let hash = fs::read_to_string(path.join(HASH_FILE_NAME))
-        .map(|h| h.trim().to_string())
-        .unwrap_or_default();
+    let hash = if include_hash {
+        fs::read_to_string(path.join(HASH_FILE_NAME))
+            .map(|h| h.trim().to_string())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     Ok(Some(BackupInfo {
         path: path.to_string_lossy().to_string(),
@@ -326,6 +335,7 @@ fn backup_info_from_folder(
 /// # Returns
 ///
 /// * `Result<Option<PathBuf>, String>` - The path to the created backup folder, or None if skipped.
+#[allow(dead_code)]
 pub fn perform_backup_for_game(
     save_dir: &Path,
     game_number: u32,
@@ -374,20 +384,23 @@ pub(crate) fn perform_backup_for_game_internal(
 
     let source = read_source_metadata(&paths.main_path)?;
     let (hash, calculated) = resolve_hash(index, game_number, &source, &paths.main_path)?;
-    if should_skip_duplicate(
-        index,
-        backup_root,
-        save_dir,
-        game_number,
-        &hash,
-        calculated,
-        &source,
-    ) {
+
+    // 1. Optimistic duplicate check (Index only)
+    if is_duplicate_by_index(index, backup_root, game_number, &hash, calculated, &source) {
         return Ok(None);
     }
 
-    // Enforce limit BEFORE creating new backup
-    if let Err(e) = enforce_backup_limit(save_dir, game_number, limit) {
+    // 2. Fetch full backup list (once) for fallback checks and limit enforcement
+    // We need hashes for deduplication, so include_hash = true
+    let backups = get_backups(save_dir, true).unwrap_or_default();
+
+    // 3. Fallback duplicate check (Content scan)
+    if is_duplicate_by_content(index, game_number, &hash, &source, &backups) {
+        return Ok(None);
+    }
+
+    // 4. Enforce limit
+    if let Err(e) = enforce_backup_limit(game_number, limit, &backups) {
         log::error!(
             "Failed to enforce backup limit for game {}: {}",
             game_number,
@@ -407,15 +420,20 @@ pub(crate) fn perform_backup_for_game_internal(
 /// Enforces the backup limit for a specific game.
 ///
 /// Deletes oldest backups if the count meets or exceeds the limit, ensuring space for one new backup.
-fn enforce_backup_limit(save_dir: &Path, game_number: u32, limit: usize) -> Result<(), String> {
+fn enforce_backup_limit(
+    game_number: u32,
+    limit: usize,
+    all_backups: &[BackupInfo],
+) -> Result<(), String> {
     // 0 means no limit
     if limit == 0 {
         return Ok(());
     }
 
-    let mut backups = get_backups(save_dir)?
-        .into_iter()
+    let mut game_backups = all_backups
+        .iter()
         .filter(|b| b.game_number == game_number && !b.locked)
+        .cloned()
         .collect::<Vec<_>>();
 
     // Backups are sorted by modified desc (newest first).
@@ -426,7 +444,7 @@ fn enforce_backup_limit(save_dir: &Path, game_number: u32, limit: usize) -> Resu
     // implies if count == limit, delete 1.
     // If count > limit (maybe user changed config), delete enough to be limit - 1.
 
-    if backups.len() >= limit {
+    if game_backups.len() >= limit {
         // We want to keep (limit - 1) backups so that adding 1 results in 'limit' backups.
         // So we keep the first (limit - 1) items.
         // We delete everything from index (limit - 1) onwards.
@@ -437,8 +455,8 @@ fn enforce_backup_limit(save_dir: &Path, game_number: u32, limit: usize) -> Resu
 
         let keep_count = if limit > 0 { limit - 1 } else { 0 };
 
-        if backups.len() > keep_count {
-            let to_delete = backups.split_off(keep_count);
+        if game_backups.len() > keep_count {
+            let to_delete = game_backups.split_off(keep_count);
             log::info!(
                 "Enforcing limit ({}): Deleting {} old backups for game {} to make room.",
                 limit,
@@ -468,7 +486,7 @@ fn enforce_backup_limit(save_dir: &Path, game_number: u32, limit: usize) -> Resu
 /// # Returns
 ///
 /// * `Result<Vec<BackupInfo>, String>` - A list of available backups.
-pub fn get_backups(save_dir: &Path) -> Result<Vec<BackupInfo>, String> {
+pub fn get_backups(save_dir: &Path, include_hash: bool) -> Result<Vec<BackupInfo>, String> {
     let backup_root = save_dir.join(BACKUP_DIR_NAME);
     if !backup_root.exists() {
         return Ok(Vec::new());
@@ -483,7 +501,9 @@ pub fn get_backups(save_dir: &Path) -> Result<Vec<BackupInfo>, String> {
 
         if path.is_dir() {
             let folder_name = entry.file_name().to_string_lossy().to_string();
-            if let Some(mut info) = backup_info_from_folder(&path, &folder_name, save_dir)? {
+            if let Some(mut info) =
+                backup_info_from_folder(&path, &folder_name, save_dir, include_hash)?
+            {
                 if let Some(note) = index.notes.get(&info.filename) {
                     info.note = Some(note.clone());
                 }
@@ -674,7 +694,7 @@ pub fn delete_backups_batch(
     keep_latest: bool,
     delete_locked: bool,
 ) -> Result<usize, String> {
-    let mut backups = get_backups(save_dir)?;
+    let mut backups = get_backups(save_dir, false)?;
     let mut deleted_count = 0;
 
     // Group backups by game number
@@ -758,7 +778,8 @@ mod tests {
         let invalid_folder = backup_root.join("not-a-backup");
         fs::create_dir_all(&invalid_folder).unwrap();
 
-        let result = backup_info_from_folder(&invalid_folder, "not-a-backup", save_dir).unwrap();
+        let result =
+            backup_info_from_folder(&invalid_folder, "not-a-backup", save_dir, true).unwrap();
         assert!(result.is_none());
     }
 
@@ -808,7 +829,7 @@ mod tests {
         assert_ne!(result_new.unwrap(), backup_folder); // Different timestamp folder
 
         // 4. List backups
-        let backups = get_backups(save_dir).unwrap();
+        let backups = get_backups(save_dir, true).unwrap();
         assert_eq!(backups.len(), 2);
         assert_eq!(backups[0].game_number, 1);
         // Verify folder name logic in listing
@@ -950,7 +971,7 @@ mod tests {
             perform_backup_for_game(save_dir, game_number, limit).unwrap();
         }
 
-        let backups = get_backups(save_dir).unwrap();
+        let backups = get_backups(save_dir, true).unwrap();
         assert_eq!(backups.len(), 2);
 
         // The newest backups should be retained (data 3 and data 2)
@@ -1033,7 +1054,7 @@ mod tests {
 
         // Check backups
 
-        let backups = get_backups(save_dir).unwrap();
+        let backups = get_backups(save_dir, true).unwrap();
 
         // Should have 3 backups total:
 
@@ -1097,7 +1118,7 @@ mod tests {
 
         perform_backup_for_game(save_dir, game_number, limit).unwrap();
 
-        let backups_final = get_backups(save_dir).unwrap();
+        let backups_final = get_backups(save_dir, true).unwrap();
 
         assert_eq!(backups_final.len(), 3);
 
@@ -1192,7 +1213,7 @@ mod tests {
         assert_eq!(index2.notes.get(&folder_name).unwrap(), "Updated Note");
 
         // 5. Verify get_backups retrieves it
-        let backups = get_backups(save_dir).unwrap();
+        let backups = get_backups(save_dir, true).unwrap();
         assert_eq!(backups[0].note.as_deref(), Some("Updated Note"));
 
         // 6. Remove note
@@ -1200,7 +1221,7 @@ mod tests {
         let index3 = load_index(&backup_root);
         assert!(!index3.notes.contains_key(&folder_name));
 
-        let backups_empty = get_backups(save_dir).unwrap();
+        let backups_empty = get_backups(save_dir, true).unwrap();
         assert!(backups_empty[0].note.is_none());
     }
 
@@ -1239,7 +1260,7 @@ mod tests {
         create_backup("v3", false);
         create_backup("v4", false); // Newest
 
-        let backups = get_backups(save_dir).unwrap();
+        let backups = get_backups(save_dir, true).unwrap();
         assert_eq!(backups.len(), 4);
 
         // Scenario 1: Delete all but latest, EXCLUDE locked.
@@ -1251,7 +1272,7 @@ mod tests {
         let deleted = delete_backups_batch(save_dir, &[game_number], true, false).unwrap();
         assert_eq!(deleted, 2, "Should delete v1 and v3");
 
-        let remaining = get_backups(save_dir).unwrap();
+        let remaining = get_backups(save_dir, true).unwrap();
         assert_eq!(remaining.len(), 2);
 
         // Verify we kept the right ones (check hash or assume sort order)
@@ -1269,7 +1290,7 @@ mod tests {
         let deleted_2 = delete_backups_batch(save_dir, &[game_number], false, true).unwrap();
         assert_eq!(deleted_2, 2);
 
-        let final_backups = get_backups(save_dir).unwrap();
+        let final_backups = get_backups(save_dir, true).unwrap();
         assert!(final_backups.is_empty());
     }
 }
