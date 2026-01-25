@@ -28,7 +28,10 @@ struct TrayState(#[allow(dead_code)] tauri::tray::TrayIcon);
 /// it attempts to detect the standard save location. If successful,
 /// the configuration is updated and saved to the specified path.
 fn bootstrap_config(config_path: &Path) -> AppConfig {
+    #[cfg(target_os = "windows")]
     let mut config = config::load_config_from_path(config_path);
+    #[cfg(not(target_os = "windows"))]
+    let config = config::load_config_from_path(config_path);
 
     // Auto-detect save path if not set (Windows only)
     #[cfg(target_os = "windows")]

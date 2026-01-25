@@ -178,9 +178,6 @@ fn debounce_loop(
     save_dir: PathBuf,
     shutdown: Arc<AtomicBool>,
 ) {
-    // Defer initial scan to improve startup responsiveness
-    thread::sleep(Duration::from_secs(3));
-
     // Initial Scan: Check for existing saves that need backup
     scan_and_backup_existing(&save_dir);
 
@@ -356,5 +353,40 @@ mod tests {
         let games: std::collections::HashSet<u32> = backups.iter().map(|b| b.game_number).collect();
         assert!(games.contains(&1));
         assert!(games.contains(&2));
+    }
+
+    /// Tests that the initial scan happens promptly (no artificial delay).
+    #[test]
+    fn test_initial_scan_is_prompt() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path().to_path_buf();
+        let save1 = save_dir.join("gamesave_1.sav");
+        std::fs::write(&save1, "data1").unwrap();
+
+        let watcher = FileWatcher::new();
+        let start_time = std::time::Instant::now();
+
+        watcher.start(save_dir.clone()).unwrap();
+
+        // Poll for backup folder with a 1.5-second timeout
+        // (well below the previous 3s threshold)
+        let mut found = false;
+        for _ in 0..15 {
+            if save_dir.join(".backups").exists() {
+                found = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        let elapsed = start_time.elapsed();
+        watcher.stop();
+
+        assert!(found, "Backup folder should be created by initial scan");
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "Initial scan should happen promptly, but took {:?}",
+            elapsed
+        );
     }
 }
