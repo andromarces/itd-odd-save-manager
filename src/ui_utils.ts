@@ -45,7 +45,8 @@ export function logActivity(
   const container =
     logContainer ||
     cachedLogContainer ||
-    (cachedLogContainer = document.querySelector<HTMLDivElement>('#activity-log'));
+    (cachedLogContainer =
+      document.querySelector<HTMLDivElement>('#activity-log'));
   if (!container) return;
 
   const entry = document.createElement('div');

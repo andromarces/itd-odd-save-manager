@@ -7,7 +7,7 @@ export interface AppElements {
   saveButton: HTMLButtonElement;
   configStatus: HTMLParagraphElement;
   refreshBackupsButton: HTMLButtonElement;
-  backupsList: HTMLTableSectionElement;
+  backupsTable: HTMLTableElement;
   launchGameButton: HTMLButtonElement;
   autoLaunchCheck: HTMLInputElement;
   autoCloseCheck: HTMLInputElement;
@@ -123,7 +123,7 @@ export function renderAppShell(): AppElements {
     saveButton: getElement<HTMLButtonElement>('#save-config'),
     configStatus: getElement<HTMLParagraphElement>('#config-status'),
     refreshBackupsButton: getElement<HTMLButtonElement>('#refresh-backups'),
-    backupsList: getElement<HTMLTableSectionElement>('#backups-list'),
+    backupsTable: getElement<HTMLTableElement>('#backups-table'),
     launchGameButton: getElement<HTMLButtonElement>('#launch-game'),
     autoLaunchCheck: getElement<HTMLInputElement>('#auto-launch-check'),
     autoCloseCheck: getElement<HTMLInputElement>('#auto-close-check'),
@@ -158,4 +158,3 @@ export function setupTabNavigation(elements: AppElements): void {
     });
   });
 }
-

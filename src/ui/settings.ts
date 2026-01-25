@@ -69,6 +69,8 @@ export function setupSettingsFeature(elements: SettingsElements): void {
   elements.launchGameButton.addEventListener('click', handleLaunchGameClick);
   elements.autoLaunchCheck.addEventListener('change', handleAutoLaunchChange);
   elements.autoCloseCheck.addEventListener('change', handleAutoCloseChange);
-  elements.maxBackupsInput.addEventListener('change', () => void saveGameSettings());
+  elements.maxBackupsInput.addEventListener(
+    'change',
+    () => void saveGameSettings(),
+  );
 }
-

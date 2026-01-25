@@ -162,7 +162,8 @@ export function createConfigFeature(
       {
         actionName: 'detect save paths',
         onError: () => {
-          elements.pathsList.innerHTML = '<li class="error">Detection failed</li>';
+          elements.pathsList.innerHTML =
+            '<li class="error">Detection failed</li>';
         },
       },
     );
@@ -190,14 +191,21 @@ export function createConfigFeature(
   function handlePathSelectionClick(event: Event): void {
     const target = event.target as HTMLElement;
     const li = target.closest('li');
-    if (!li || li.classList.contains('empty') || li.classList.contains('error')) {
+    if (
+      !li ||
+      li.classList.contains('empty') ||
+      li.classList.contains('error')
+    ) {
       return;
     }
 
     const path = li.textContent;
     if (path) {
       elements.manualInput.value = path;
-      setConfigStatus('Path selected from list. Click "Set Path" to save.', 'info');
+      setConfigStatus(
+        'Path selected from list. Click "Set Path" to save.',
+        'info',
+      );
     }
   }
 
@@ -249,4 +257,3 @@ export function createConfigFeature(
     applyAutoDetectionAvailability,
   };
 }
-

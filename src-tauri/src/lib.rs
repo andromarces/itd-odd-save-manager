@@ -134,6 +134,19 @@ async fn toggle_backup_lock_command(
     run_blocking(move || backup::set_backup_lock(&verified_path, locked)).await
 }
 
+/// Tauri command to set or update a note for a backup.
+#[tauri::command(rename_all = "snake_case")]
+async fn set_backup_note_command(
+    state: tauri::State<'_, ConfigState>,
+    backup_filename: String,
+    note: Option<String>,
+) -> Result<(), String> {
+    let save_path =
+        extract_save_path(&state)?.ok_or_else(|| "Save path not configured".to_string())?;
+
+    run_blocking(move || backup::set_backup_note(&save_path, &backup_filename, note)).await
+}
+
 /// Command to initialize the watcher from the frontend.
 /// This ensures the watcher starts strictly after the UI is shown.
 #[tauri::command(rename_all = "snake_case")]
@@ -317,6 +330,7 @@ pub fn run() {
             get_backups_command,
             restore_backup_command,
             toggle_backup_lock_command,
+            set_backup_note_command,
             init_watcher,
             game_manager::launch_game
         ])

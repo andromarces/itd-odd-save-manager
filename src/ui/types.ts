@@ -15,7 +15,7 @@ export interface BackupInfo {
   game_number: number;
   locked: boolean;
   hash: string;
+  note?: string | null;
 }
 
 export type StatusType = 'info' | 'success' | 'error';
-

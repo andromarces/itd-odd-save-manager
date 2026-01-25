@@ -36,11 +36,15 @@ pub struct BackupInfo {
     pub locked: bool,
     /// The SHA-256 hash of the main save file.
     pub hash: String,
+    /// An optional user-provided note.
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub(crate) struct BackupIndex {
     pub(crate) games: HashMap<u32, IndexEntry>,
+    #[serde(default)]
+    pub(crate) notes: HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -305,6 +309,7 @@ fn backup_info_from_folder(
         game_number: info.game_number,
         locked,
         hash,
+        note: None,
     }))
 }
 
@@ -469,6 +474,7 @@ pub fn get_backups(save_dir: &Path) -> Result<Vec<BackupInfo>, String> {
         return Ok(Vec::new());
     }
 
+    let index = load_index(&backup_root);
     let mut backups = Vec::new();
 
     for entry in fs::read_dir(&backup_root).map_err(|e| e.to_string())? {
@@ -477,7 +483,10 @@ pub fn get_backups(save_dir: &Path) -> Result<Vec<BackupInfo>, String> {
 
         if path.is_dir() {
             let folder_name = entry.file_name().to_string_lossy().to_string();
-            if let Some(info) = backup_info_from_folder(&path, &folder_name, save_dir)? {
+            if let Some(mut info) = backup_info_from_folder(&path, &folder_name, save_dir)? {
+                if let Some(note) = index.notes.get(&info.filename) {
+                    info.note = Some(note.clone());
+                }
                 backups.push(info);
             }
         }
@@ -527,10 +536,64 @@ pub fn restore_backup(backup_folder_path: &Path, target_save_dir: &Path) -> Resu
             backup_folder_path,
             target_save_dir
         );
+        if let Err(e) = update_index_after_restore(backup_folder_path, target_save_dir) {
+            log::warn!("Failed to update backup index after restore: {}", e);
+        }
         Ok(())
     } else {
         Err("No valid save files found in backup folder to restore".to_string())
     }
+}
+
+/// Updates the backup index after a successful restore when possible.
+fn update_index_after_restore(
+    backup_folder_path: &Path,
+    target_save_dir: &Path,
+) -> Result<(), String> {
+    let folder_name = backup_folder_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Backup folder name is invalid".to_string())?;
+    let info = filename_utils::parse_backup_folder_name(folder_name)
+        .ok_or_else(|| "Backup folder name did not match expected format".to_string())?;
+    let backup_root = target_save_dir.join(BACKUP_DIR_NAME);
+    if !backup_folder_path.starts_with(&backup_root) {
+        return Err("Backup folder is not under the target .backups directory".to_string());
+    }
+
+    let paths = build_save_paths(target_save_dir, info.game_number);
+    if !paths.main_path.exists() {
+        return Err("Restored main save file was not found after restore".to_string());
+    }
+    let source = read_source_metadata(&paths.main_path)?;
+
+    let hash_path = backup_folder_path.join(HASH_FILE_NAME);
+    let hash = if hash_path.exists() {
+        fs::read_to_string(&hash_path)
+            .map_err(|e| e.to_string())?
+            .trim()
+            .to_string()
+    } else {
+        String::new()
+    };
+    let hash = if hash.is_empty() {
+        calculate_hash(&paths.main_path)?
+    } else {
+        hash
+    };
+
+    let mut index = load_index(&backup_root);
+    index.games.insert(
+        info.game_number,
+        IndexEntry {
+            last_hash: hash,
+            last_source_size: source.size,
+            last_source_modified: source.modified_nanos,
+            last_backup_path: folder_name.to_string(),
+        },
+    );
+    save_index(&backup_root, &index);
+    Ok(())
 }
 
 /// Sets or unsets the lock status for a backup folder.
@@ -549,6 +612,32 @@ pub fn set_backup_lock(backup_folder_path: &Path, locked: bool) -> Result<(), St
         fs::remove_file(&lock_file).map_err(|e| e.to_string())?;
     }
 
+    Ok(())
+}
+
+/// Sets or updates a note for a specific backup.
+pub fn set_backup_note(
+    save_dir: &Path,
+    folder_name: &str,
+    note: Option<String>,
+) -> Result<(), String> {
+    let backup_root = ensure_backup_root(save_dir)?;
+    let mut index = load_index(&backup_root);
+
+    if let Some(n) = note {
+        let trimmed = n.trim();
+        if trimmed.is_empty() {
+            index.notes.remove(folder_name);
+        } else {
+            index
+                .notes
+                .insert(folder_name.to_string(), trimmed.to_string());
+        }
+    } else {
+        index.notes.remove(folder_name);
+    }
+
+    save_index(&backup_root, &index);
     Ok(())
 }
 
@@ -987,5 +1076,53 @@ mod tests {
             entry.last_backup_path,
             backup1_path.file_name().unwrap().to_string_lossy()
         );
+    }
+
+    /// Tests note persistence and management.
+    #[test]
+    fn test_note_persistence() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 1;
+
+        // 1. Create a backup
+        let main_sav = save_dir.join("gamesave_1.sav");
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "data").unwrap();
+        }
+        let backup_path = perform_backup_for_game(save_dir, game_number, 100)
+            .unwrap()
+            .unwrap();
+        let folder_name = backup_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        // 2. Set a note
+        set_backup_note(save_dir, &folder_name, Some("My Note".to_string())).unwrap();
+
+        // 3. Verify in index
+        let backup_root = save_dir.join(BACKUP_DIR_NAME);
+        let index = load_index(&backup_root);
+        assert_eq!(index.notes.get(&folder_name).unwrap(), "My Note");
+
+        // 4. Update note
+        set_backup_note(save_dir, &folder_name, Some("Updated Note".to_string())).unwrap();
+        let index2 = load_index(&backup_root);
+        assert_eq!(index2.notes.get(&folder_name).unwrap(), "Updated Note");
+
+        // 5. Verify get_backups retrieves it
+        let backups = get_backups(save_dir).unwrap();
+        assert_eq!(backups[0].note.as_deref(), Some("Updated Note"));
+
+        // 6. Remove note
+        set_backup_note(save_dir, &folder_name, None).unwrap();
+        let index3 = load_index(&backup_root);
+        assert!(!index3.notes.contains_key(&folder_name));
+
+        let backups_empty = get_backups(save_dir).unwrap();
+        assert!(backups_empty[0].note.is_none());
     }
 }
