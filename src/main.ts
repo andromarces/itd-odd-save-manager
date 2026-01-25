@@ -97,7 +97,7 @@ app.innerHTML = `
     <section class="panel">
       <h2>Discovery</h2>
       <div class="actions">
-        <button id="detect" type="button">Auto Detect Steam Paths</button>
+        <button id="detect" type="button">Auto Detect Save Path</button>
       </div>
       <ul id="paths" class="paths" aria-live="polite"></ul>
     </section>
@@ -168,7 +168,7 @@ function renderPaths(paths: string[]): void {
 
   if (paths.length === 0) {
     const item = document.createElement('li');
-    item.textContent = 'No Steam save paths detected.';
+    item.textContent = 'No save paths detected.';
     item.classList.add('empty');
     pathsList.appendChild(item);
     return;
@@ -192,6 +192,15 @@ function formatDate(isoString: string): string {
   } catch {
     return isoString;
   }
+}
+
+/**
+ * Builds the restore confirmation message for a backup.
+ */
+export function buildRestoreConfirmationMessage(backup: BackupInfo): string {
+  let message = `Are you sure you want to restore "${backup.original_filename}" (Game ${backup.game_number + 1}) from ${formatDate(backup.modified)}?`;
+  message += `\nThis will overwrite the current save files for Game ${backup.game_number + 1}.`;
+  return message;
 }
 
 /**
@@ -322,20 +331,7 @@ async function loadBackups(): Promise<void> {
  * Restores a backup.
  */
 async function restoreBackup(backup: BackupInfo): Promise<void> {
-  let message = `Are you sure you want to restore "${backup.original_filename}" (Game ${backup.game_number + 1}) from ${formatDate(backup.modified)}?`;
-  message += `\nThis will overwrite the current save files for Game ${backup.game_number + 1}.`;
-
-  const isCloud = await safeInvoke<boolean>(
-    'check_steam_cloud_path',
-    { path: backup.original_path },
-    {
-      actionName: 'check Steam Cloud status',
-    },
-  );
-
-  if (isCloud) {
-    message += `\n\nWARNING: Steam Cloud folder detected.\nSteam may overwrite this restore with its cloud copy unless you launch in Offline Mode or disable Steam Cloud.`;
-  }
+  const message = buildRestoreConfirmationMessage(backup);
 
   const confirmed = window.confirm(message);
   if (!confirmed) return;
@@ -471,7 +467,7 @@ async function savePath(): Promise<void> {
 }
 
 /**
- * Calls the backend command to detect Steam save paths.
+ * Calls the backend command to detect save paths.
  */
 async function detectSteamSavePaths(): Promise<void> {
   detectButton.disabled = true;
@@ -482,7 +478,7 @@ async function detectSteamSavePaths(): Promise<void> {
     'detect_steam_save_paths',
     undefined,
     {
-      actionName: 'detect steam save paths',
+      actionName: 'detect save paths',
       onError: () => {
         pathsList.innerHTML = '<li class="error">Detection failed</li>';
       },
@@ -503,13 +499,13 @@ async function detectSteamSavePaths(): Promise<void> {
   }
 
   detectButton.disabled = false;
-  detectButton.textContent = 'Auto Detect Steam Paths';
+  detectButton.textContent = 'Auto Detect Save Path';
 }
 
 // Event Listeners
 
 /**
- * Handler for the "Auto Detect Steam Paths" button click.
+ * Handler for the "Auto Detect Save Path" button click.
  * Triggers the backend detection logic and updates the UI.
  */
 const onDetectClick = (): void => {
@@ -600,5 +596,29 @@ backupsList.addEventListener('click', (event) => {
   }
 });
 
+/**
+ * Applies platform-specific auto-detection availability to the UI.
+ */
+export async function applyAutoDetectionAvailability(): Promise<void> {
+  const supported = await safeInvoke<boolean>(
+    'is_auto_detection_supported',
+    undefined,
+    {
+      actionName: 'check auto-detection support',
+    },
+  );
+
+  if (supported === false) {
+    detectButton.remove();
+    pathsList.innerHTML = '';
+    const item = document.createElement('li');
+    item.textContent =
+      'Auto-detection is only available on Windows. Enter a path manually.';
+    item.classList.add('empty');
+    pathsList.appendChild(item);
+  }
+}
+
 // Initial load
+void applyAutoDetectionAvailability();
 void loadConfig();

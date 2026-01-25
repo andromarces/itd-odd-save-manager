@@ -4,11 +4,10 @@ Portable auto‑save backup app for _Into the Dead: Our Darkest Days_.
 
 ## Features
 
-- **Auto-Detection**: Automatically finds Steam save locations.
+- **Auto-Detection**: Automatically finds the local save folder on Windows at `%USERPROFILE%\AppData\LocalLow\PikPok\IntoTheDeadOurDarkestDays`.
 - **Manual Override**: Allows selecting any custom folder or file to watch.
 - **Automated Backups**: Watches for changes and creates timestamped backups instantly.
 - **Smart Restore**: browse and restore backups with a single click.
-- **Steam Cloud Awareness**: Detects and warns about Steam Cloud conflicts.
 - **Game Integration**:
   - Launch the game directly from the app.
   - **Auto-Launch**: Optional setting to launch the game when the app starts.
@@ -22,7 +21,7 @@ Portable auto‑save backup app for _Into the Dead: Our Darkest Days_.
 
 ### Configuration
 
-1. **Save Path**: The app attempts to auto-detect your save path. If incorrect, enter the path manually in the "Active Configuration" section.
+1. **Save Path**: The app attempts to auto-detect your save path on Windows. If not found, enter the path manually in the "Active Configuration" section.
 2. **Game Settings**:
    - Check **Auto-launch game** to start the game immediately when opening this manager.
    - Check **Close app when game exits** to shut down the manager automatically after you finish playing.
@@ -32,23 +31,12 @@ Portable auto‑save backup app for _Into the Dead: Our Darkest Days_.
 - **Backups** are created automatically whenever the game saves.
 - To **Restore**, click the "Restore" button next to a backup entry.
   - _Warning_: Restoring overwrites your current save.
-  - If using Steam Cloud, you may need to disable it or go offline to prevent Steam from reverting your restore.
 
 ### System Tray
 
 - Closing the window minimizes the app to the System Tray.
 - Right-click the tray icon to access the menu.
 - Use "Quit" from the tray menu to fully exit the application.
-
-## Steam Cloud Support
-
-The application automatically detects if your save files are located within the Steam Cloud synchronization folder (`userdata`).
-
-- **Detection**: If a Steam Cloud path is detected, the app will flag it internally.
-- **Restoring**: When attempting to restore a backup to a Steam Cloud location, you will receive a warning.
-- **Conflict**: Steam Cloud may overwrite your restored file with its own cloud copy upon game launch. To prevent this, consider:
-  - Disabling Steam Cloud for this game.
-  - Launching Steam in Offline Mode.
 
 ## Development
 
