@@ -59,11 +59,11 @@ export function createBackupRow(backup: BackupInfo, index: number): HTMLTableRow
 }
 
 /**
- * Creates a note row for a backup.
+ * Creates a visible note row for a backup.
  */
 export function createNoteRow(note: string): HTMLTableRowElement {
   const noteRow = document.createElement('tr');
-  noteRow.className = 'note-row';
+  noteRow.className = 'note-row expanded';
   const noteCell = document.createElement('td');
   noteCell.colSpan = 3;
   noteCell.textContent = note;

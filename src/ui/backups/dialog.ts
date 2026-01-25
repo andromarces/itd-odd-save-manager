@@ -17,15 +17,22 @@ type DialogElements = Pick<
  * Controller for the Master Delete dialog functionality.
  */
 export class MasterDeleteController {
+  private elements: DialogElements;
+  private onComplete: () => Promise<void>;
+
   /**
    * Creates a new MasterDeleteController.
    */
-  constructor(
-    private elements: DialogElements,
-    private onComplete: () => Promise<void>
-  ) {
-    this.elements.masterDeleteCancelBtn.addEventListener('click', () => this.close());
-    this.elements.masterDeleteForm.addEventListener('submit', (e) => this.handleSubmit(e));
+  constructor(elements: DialogElements, onComplete: () => Promise<void>) {
+    this.elements = elements;
+    this.onComplete = onComplete;
+
+    this.elements.masterDeleteCancelBtn.addEventListener('click', () =>
+      this.close(),
+    );
+    this.elements.masterDeleteForm.addEventListener('submit', (e) =>
+      this.handleSubmit(e),
+    );
   }
 
   /**
@@ -72,9 +79,10 @@ export class MasterDeleteController {
     event.preventDefault();
 
     const selectedGames: number[] = [];
-    const checkboxes = this.elements.masterDeleteGameList.querySelectorAll<HTMLInputElement>(
-      'input[type="checkbox"]'
-    );
+    const checkboxes =
+      this.elements.masterDeleteGameList.querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"]',
+      );
     checkboxes.forEach((cb) => {
       if (cb.checked) {
         selectedGames.push(parseInt(cb.value, 10));
@@ -100,8 +108,12 @@ export class MasterDeleteController {
       }
     });
 
-    const modeText = keepLatest ? 'Delete all except latest' : 'Delete ALL backups';
-    const lockedText = deleteLocked ? '(INCLUDING locked backups)' : '(excluding locked backups)';
+    const modeText = keepLatest
+      ? 'Delete all except latest'
+      : 'Delete ALL backups';
+    const lockedText = deleteLocked
+      ? '(INCLUDING locked backups)'
+      : '(excluding locked backups)';
     const confirmMsg = `Are you sure?\n\nAction: ${modeText}\nTarget: ${selectedGames.length} Game(s)\n${lockedText}\n\nThis cannot be undone.`;
 
     if (!confirm(confirmMsg)) return;
@@ -119,7 +131,7 @@ export class MasterDeleteController {
       'batch delete',
       {
         onError: () => logActivity('Failed to perform batch delete.'),
-      }
+      },
     );
 
     if (deletedCount !== undefined) {

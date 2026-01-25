@@ -29,7 +29,6 @@ export interface AppElements {
 const APP_TEMPLATE = `
   <main class="layout">
     <header class="header">
-      <p class="kicker">Steam on Windows</p>
       <h1>ITD ODD Save Manager</h1>
       <p class="subhead">
         Manage your save files for Into the Dead: Our Darkest Days.

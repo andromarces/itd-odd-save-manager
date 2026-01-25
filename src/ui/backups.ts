@@ -10,6 +10,8 @@ import {
 } from './backups/render';
 import { MasterDeleteController } from './backups/dialog';
 
+export { getBackupDisplayName, buildRestoreConfirmationMessage };
+
 type BackupsElements = Pick<
   AppElements,
   | 'manualInput'
@@ -33,17 +35,22 @@ export interface BackupsFeature {
 /**
  * Creates the backups feature, wiring the UI and returning feature actions.
  */
-export function createBackupsFeature(elements: BackupsElements): BackupsFeature {
+export function createBackupsFeature(
+  elements: BackupsElements,
+): BackupsFeature {
   let currentBackups: BackupInfo[] = [];
 
-  const masterDelete = new MasterDeleteController(elements, () => loadBackups());
+  const masterDelete = new MasterDeleteController(elements, () =>
+    loadBackups(),
+  );
 
   /**
    * Renders the list of backups into the table body.
    */
   function renderBackups(backups: BackupInfo[]): void {
     if (backups.length === 0) {
-      elements.backupsList.innerHTML = '<tr><td colspan="3" class="empty">No backups found.</td></tr>';
+      elements.backupsList.innerHTML =
+        '<tr><td colspan="3" class="empty">No backups found.</td></tr>';
       return;
     }
 
@@ -67,11 +74,17 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
     elements.refreshBackupsButton.textContent = 'Refreshing...';
     elements.refreshBackupsButton.disabled = true;
 
-    const backups = await invokeAction<BackupInfo[]>('get_backups_command', undefined, 'load backups', {
-      onError: () => {
-        elements.backupsList.innerHTML = '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
+    const backups = await invokeAction<BackupInfo[]>(
+      'get_backups_command',
+      undefined,
+      'load backups',
+      {
+        onError: () => {
+          elements.backupsList.innerHTML =
+            '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
+        },
       },
-    });
+    );
 
     if (backups) {
       currentBackups = backups;
@@ -95,8 +108,9 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
       },
       'toggle backup lock',
       {
-        onError: () => logActivity(`Failed to toggle lock for ${backup.filename}`),
-      }
+        onError: () =>
+          logActivity(`Failed to toggle lock for ${backup.filename}`),
+      },
     );
 
     if (success !== undefined) {
@@ -122,7 +136,7 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
       'set backup note',
       {
         onError: () => logActivity(`Failed to set note for ${backup.filename}`),
-      }
+      },
     );
 
     if (success !== undefined) {
@@ -137,8 +151,8 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
   async function deleteBackup(backup: BackupInfo): Promise<void> {
     const confirmed = window.confirm(
       `Are you sure you want to delete the backup for ${getBackupDisplayName(
-        backup
-      )} from ${formatDate(backup.modified)}?\nThis action cannot be undone.`
+        backup,
+      )} from ${formatDate(backup.modified)}?\nThis action cannot be undone.`,
     );
     if (!confirmed) return;
 
@@ -151,7 +165,7 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
       {
         successLog: `Deleted backup: ${backup.filename}`,
         onError: () => logActivity(`Failed to delete ${backup.filename}`),
-      }
+      },
     );
 
     if (success !== undefined) {
@@ -182,7 +196,7 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
         successLog: `Restored backup: ${backup.filename}`,
         successAlert: 'Restore successful!',
         alertOnError: true,
-      }
+      },
     );
   }
 
@@ -213,12 +227,14 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
 
     const row = target.closest('tr');
     if (row && row.classList.contains('note-row')) {
-      row.classList.toggle('expanded');
+      return;
     }
   }
 
   elements.backupsTable.addEventListener('click', handleBackupsTableClick);
-  elements.masterDeleteButton.addEventListener('click', () => masterDelete.open(currentBackups));
+  elements.masterDeleteButton.addEventListener('click', () =>
+    masterDelete.open(currentBackups),
+  );
   elements.refreshBackupsButton.addEventListener('click', () => loadBackups());
 
   return {
