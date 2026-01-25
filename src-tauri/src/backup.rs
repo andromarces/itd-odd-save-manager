@@ -641,6 +641,84 @@ pub fn set_backup_note(
     Ok(())
 }
 
+/// Deletes a specific backup folder.
+pub fn delete_backup_folder(backup_folder_path: &Path) -> Result<(), String> {
+    if !backup_folder_path.exists() {
+        return Err("Backup folder does not exist".to_string());
+    }
+
+    // Safety check: Ensure we are deleting a directory
+    if !backup_folder_path.is_dir() {
+        return Err("Path is not a directory".to_string());
+    }
+
+    fs::remove_dir_all(backup_folder_path).map_err(|e| e.to_string())?;
+    log::info!("Deleted backup folder: {:?}", backup_folder_path);
+
+    // Note: We do not strictly need to update the index immediately as the next get_backups
+    // or perform_backup will handle missing folders gracefully or update the index.
+    // However, for cleanliness, one could load and clean the index, but it's an optimization.
+    Ok(())
+}
+
+/// Batch deletes backups based on criteria.
+///
+/// # Arguments
+/// * `save_dir` - The directory containing the `.backups` folder.
+/// * `target_games` - List of game numbers to target.
+/// * `keep_latest` - If true, keeps the most recent backup for each game.
+/// * `delete_locked` - If true, deletes locked backups as well.
+pub fn delete_backups_batch(
+    save_dir: &Path,
+    target_games: &[u32],
+    keep_latest: bool,
+    delete_locked: bool,
+) -> Result<usize, String> {
+    let mut backups = get_backups(save_dir)?;
+    let mut deleted_count = 0;
+
+    // Group backups by game number
+    // backups are already sorted by modified desc (newest first)
+    let mut games_backups: HashMap<u32, Vec<BackupInfo>> = HashMap::new();
+    for backup in backups.drain(..) {
+        games_backups
+            .entry(backup.game_number)
+            .or_default()
+            .push(backup);
+    }
+
+    for &game_number in target_games {
+        if let Some(game_list) = games_backups.get(&game_number) {
+            let candidates = if keep_latest {
+                // Skip the first one (newest), consider the rest
+                if game_list.is_empty() {
+                    &[]
+                } else {
+                    &game_list[1..]
+                }
+            } else {
+                // Consider all
+                &game_list[..]
+            };
+
+            for backup in candidates {
+                if backup.locked && !delete_locked {
+                    continue;
+                }
+
+                let path = PathBuf::from(&backup.path);
+                if let Err(e) = delete_backup_folder(&path) {
+                    log::error!("Failed to delete backup {:?}: {}", path, e);
+                } else {
+                    deleted_count += 1;
+                }
+            }
+        }
+    }
+
+    Ok(deleted_count)
+}
+
 /// Calculates the SHA-256 hash of a file.
 fn calculate_hash(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
@@ -1124,5 +1202,74 @@ mod tests {
 
         let backups_empty = get_backups(save_dir).unwrap();
         assert!(backups_empty[0].note.is_none());
+    }
+
+    /// Tests batch deletion logic.
+    #[test]
+    fn test_batch_delete() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 1;
+        let main_sav = save_dir.join("gamesave_1.sav");
+
+        // Helper to create a backup
+        let create_backup = |content: &str, locked: bool| -> String {
+            {
+                let mut f = File::create(&main_sav).unwrap();
+                writeln!(f, "{}", content).unwrap();
+            }
+            // Sleep to ensure unique timestamps
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let path = perform_backup_for_game(save_dir, game_number, 100)
+                .unwrap()
+                .unwrap();
+            if locked {
+                set_backup_lock(&path, true).unwrap();
+            }
+            path.file_name().unwrap().to_string_lossy().to_string()
+        };
+
+        // Create 4 backups:
+        // 1. Oldest (Unlocked)
+        // 2. Mid (Locked)
+        // 3. Mid-New (Unlocked)
+        // 4. Newest (Unlocked)
+        create_backup("v1", false); // Oldest
+        create_backup("v2", true); // Locked
+        create_backup("v3", false);
+        create_backup("v4", false); // Newest
+
+        let backups = get_backups(save_dir).unwrap();
+        assert_eq!(backups.len(), 4);
+
+        // Scenario 1: Delete all but latest, EXCLUDE locked.
+        // Expectation:
+        // - v4 (Newest) -> Keep (it's the latest)
+        // - v2 (Locked) -> Keep (excluded from delete)
+        // - v3 -> Delete
+        // - v1 -> Delete
+        let deleted = delete_backups_batch(save_dir, &[game_number], true, false).unwrap();
+        assert_eq!(deleted, 2, "Should delete v1 and v3");
+
+        let remaining = get_backups(save_dir).unwrap();
+        assert_eq!(remaining.len(), 2);
+
+        // Verify we kept the right ones (check hash or assume sort order)
+        // remaining[0] is v4 (newest), remaining[1] is v2 (locked)
+        let content_0 =
+            fs::read_to_string(Path::new(&remaining[0].path).join("gamesave_1.sav")).unwrap();
+        assert_eq!(content_0.trim(), "v4");
+
+        let content_1 =
+            fs::read_to_string(Path::new(&remaining[1].path).join("gamesave_1.sav")).unwrap();
+        assert_eq!(content_1.trim(), "v2");
+
+        // Scenario 2: Delete ALL, INCLUDE locked.
+        // Expectation: Delete everything remaining (v4 and v2).
+        let deleted_2 = delete_backups_batch(save_dir, &[game_number], false, true).unwrap();
+        assert_eq!(deleted_2, 2);
+
+        let final_backups = get_backups(save_dir).unwrap();
+        assert!(final_backups.is_empty());
     }
 }

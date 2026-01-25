@@ -7,6 +7,7 @@ export interface AppElements {
   saveButton: HTMLButtonElement;
   configStatus: HTMLParagraphElement;
   refreshBackupsButton: HTMLButtonElement;
+  masterDeleteButton: HTMLButtonElement;
   backupsTable: HTMLTableElement;
   launchGameButton: HTMLButtonElement;
   autoLaunchCheck: HTMLInputElement;
@@ -14,6 +15,14 @@ export interface AppElements {
   maxBackupsInput: HTMLInputElement;
   tabButtons: NodeListOf<HTMLButtonElement>;
   tabPanels: NodeListOf<HTMLElement>;
+  // Dialog Elements
+  masterDeleteDialog: HTMLDialogElement;
+  masterDeleteForm: HTMLFormElement;
+  masterDeleteGameList: HTMLDivElement;
+  masterDeleteModeRadios: NodeListOf<HTMLInputElement>;
+  masterDeleteLockedRadios: NodeListOf<HTMLInputElement>;
+  masterDeleteCancelBtn: HTMLButtonElement;
+  masterDeleteConfirmBtn: HTMLButtonElement;
 }
 
 const APP_TEMPLATE = `
@@ -54,6 +63,7 @@ const APP_TEMPLATE = `
         <h2>Backups</h2>
         <div class="actions">
           <button id="refresh-backups" type="button" disabled>Refresh Backups</button>
+          <button id="master-delete-btn" type="button" class="danger">Delete Backups...</button>
         </div>
         <div class="table-container">
           <table id="backups-table">
@@ -107,6 +117,52 @@ const APP_TEMPLATE = `
       </section>
     </div>
   </main>
+
+  <dialog id="master-delete-dialog" class="modal">
+    <form id="master-delete-form" method="dialog">
+      <h2>Delete Backups</h2>
+      
+      <fieldset>
+        <legend>Select Games</legend>
+        <div id="master-delete-game-list" class="checkbox-list">
+          <!-- Populated dynamically -->
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Action</legend>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="delete-mode" value="all" />
+            Delete all backups
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="delete-mode" value="all-but-latest" checked />
+            Delete all except latest
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Locked Backups</legend>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="delete-locked" value="exclude" checked />
+            Exclude locked backups (Keep them)
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="delete-locked" value="include" />
+            Include locked backups (Delete them)
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="modal-actions">
+        <button type="button" id="master-delete-cancel">Cancel</button>
+        <button type="submit" id="master-delete-confirm" class="danger">Delete</button>
+      </div>
+    </form>
+  </dialog>
 `;
 
 /**
@@ -123,6 +179,7 @@ export function renderAppShell(): AppElements {
     saveButton: getElement<HTMLButtonElement>('#save-config'),
     configStatus: getElement<HTMLParagraphElement>('#config-status'),
     refreshBackupsButton: getElement<HTMLButtonElement>('#refresh-backups'),
+    masterDeleteButton: getElement<HTMLButtonElement>('#master-delete-btn'),
     backupsTable: getElement<HTMLTableElement>('#backups-table'),
     launchGameButton: getElement<HTMLButtonElement>('#launch-game'),
     autoLaunchCheck: getElement<HTMLInputElement>('#auto-launch-check'),
@@ -130,6 +187,24 @@ export function renderAppShell(): AppElements {
     maxBackupsInput: getElement<HTMLInputElement>('#max-backups-input'),
     tabButtons: document.querySelectorAll<HTMLButtonElement>('.tab-button'),
     tabPanels: document.querySelectorAll<HTMLElement>('.tab-panel'),
+    // Dialog
+    masterDeleteDialog: getElement<HTMLDialogElement>('#master-delete-dialog'),
+    masterDeleteForm: getElement<HTMLFormElement>('#master-delete-form'),
+    masterDeleteGameList: getElement<HTMLDivElement>(
+      '#master-delete-game-list',
+    ),
+    masterDeleteModeRadios: document.querySelectorAll<HTMLInputElement>(
+      'input[name="delete-mode"]',
+    ),
+    masterDeleteLockedRadios: document.querySelectorAll<HTMLInputElement>(
+      'input[name="delete-locked"]',
+    ),
+    masterDeleteCancelBtn: getElement<HTMLButtonElement>(
+      '#master-delete-cancel',
+    ),
+    masterDeleteConfirmBtn: getElement<HTMLButtonElement>(
+      '#master-delete-confirm',
+    ),
   };
 }
 

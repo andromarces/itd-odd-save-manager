@@ -4,7 +4,17 @@ import type { BackupInfo } from './types';
 
 type BackupsElements = Pick<
   AppElements,
-  'manualInput' | 'refreshBackupsButton' | 'backupsTable'
+  | 'manualInput'
+  | 'refreshBackupsButton'
+  | 'backupsTable'
+  | 'masterDeleteButton'
+  | 'masterDeleteDialog'
+  | 'masterDeleteForm'
+  | 'masterDeleteGameList'
+  | 'masterDeleteModeRadios'
+  | 'masterDeleteLockedRadios'
+  | 'masterDeleteCancelBtn'
+  | 'masterDeleteConfirmBtn'
 >;
 
 export interface BackupsFeature {
@@ -103,9 +113,17 @@ export function createBackupsFeature(
       noteBtn.style.marginLeft = '8px';
       noteBtn.title = backup.note ? 'Edit Note' : 'Add Note';
 
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.className = 'small danger';
+      deleteBtn.dataset.index = index.toString();
+      deleteBtn.dataset.action = 'delete';
+      deleteBtn.style.marginLeft = '8px';
+
       actionCell.appendChild(restoreBtn);
       actionCell.appendChild(lockBtn);
       actionCell.appendChild(noteBtn);
+      actionCell.appendChild(deleteBtn);
 
       row.appendChild(fileCell);
       row.appendChild(dateCell);
@@ -207,6 +225,31 @@ export function createBackupsFeature(
   }
 
   /**
+   * Deletes a specific backup after user confirmation.
+   */
+  async function deleteBackup(backup: BackupInfo): Promise<void> {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete the backup for ${getBackupDisplayName(
+        backup,
+      )} from ${formatDate(backup.modified)}?\nThis action cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    await safeInvoke(
+      'delete_backup_command',
+      {
+        backup_path: backup.path,
+      },
+      {
+        actionName: 'delete backup',
+        successLog: `Deleted backup: ${backup.filename}`,
+        onError: () => logActivity(`Failed to delete ${backup.filename}`),
+      },
+    );
+    await loadBackups();
+  }
+
+  /**
    * Restores a selected backup after user confirmation.
    */
   async function restoreBackup(backup: BackupInfo): Promise<void> {
@@ -229,6 +272,113 @@ export function createBackupsFeature(
     );
   }
 
+  // --- Master Delete Logic ---
+
+  function openMasterDeleteDialog() {
+    if (currentBackups.length === 0) {
+      alert('No backups available to delete.');
+      return;
+    }
+
+    // Populate Game List
+    const uniqueGames = new Set<number>();
+    currentBackups.forEach((b) => uniqueGames.add(b.game_number));
+
+    elements.masterDeleteGameList.innerHTML = '';
+    const sortedGames = Array.from(uniqueGames).sort((a, b) => a - b);
+
+    sortedGames.forEach((gameNum) => {
+      const label = document.createElement('label');
+      label.className = 'checkbox-label';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = gameNum.toString();
+      input.checked = true; // Default to selected
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(` Game ${gameNum + 1}`));
+      elements.masterDeleteGameList.appendChild(label);
+    });
+
+    elements.masterDeleteDialog.showModal();
+  }
+
+  function closeMasterDeleteDialog() {
+    elements.masterDeleteDialog.close();
+  }
+
+  async function handleMasterDeleteSubmit(event: Event) {
+    event.preventDefault();
+
+    // 1. Get Selected Games
+    const selectedGames: number[] = [];
+    const checkboxes =
+      elements.masterDeleteGameList.querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"]',
+      );
+    checkboxes.forEach((cb) => {
+      if (cb.checked) {
+        selectedGames.push(parseInt(cb.value, 10));
+      }
+    });
+
+    if (selectedGames.length === 0) {
+      alert('Please select at least one game.');
+      return;
+    }
+
+    // 2. Get Mode
+    let keepLatest = true;
+    elements.masterDeleteModeRadios.forEach((radio) => {
+      if (radio.checked && radio.value === 'all') {
+        keepLatest = false;
+      }
+    });
+
+    // 3. Get Locked Setting
+    let deleteLocked = false;
+    elements.masterDeleteLockedRadios.forEach((radio) => {
+      if (radio.checked && radio.value === 'include') {
+        deleteLocked = true;
+      }
+    });
+
+    // 4. Confirm
+    const modeText = keepLatest
+      ? 'Delete all except latest'
+      : 'Delete ALL backups';
+    const lockedText = deleteLocked
+      ? '(INCLUDING locked backups)'
+      : '(excluding locked backups)';
+    const confirmMsg = `Are you sure?\n\nAction: ${modeText}\nTarget: ${selectedGames.length} Game(s)\n${lockedText}\n\nThis cannot be undone.`;
+
+    if (!confirm(confirmMsg)) return;
+
+    elements.masterDeleteConfirmBtn.disabled = true;
+    elements.masterDeleteConfirmBtn.textContent = 'Deleting...';
+
+    const deletedCount = await safeInvoke<number>(
+      'batch_delete_backups_command',
+      {
+        game_numbers: selectedGames,
+        keep_latest: keepLatest,
+        delete_locked: deleteLocked,
+      },
+      {
+        actionName: 'batch delete',
+        onError: () => logActivity('Failed to perform batch delete.'),
+      },
+    );
+
+    if (deletedCount !== undefined) {
+      logActivity(`Batch delete completed. Removed ${deletedCount} backups.`);
+      closeMasterDeleteDialog();
+      await loadBackups();
+    }
+
+    elements.masterDeleteConfirmBtn.disabled = false;
+    elements.masterDeleteConfirmBtn.textContent = 'Delete';
+  }
+
   /**
    * Handles delegated clicks on the backups table.
    */
@@ -247,6 +397,8 @@ export function createBackupsFeature(
           void toggleBackupLock(backup);
         } else if (action === 'note') {
           void editBackupNote(backup);
+        } else if (action === 'delete') {
+          void deleteBackup(backup);
         }
       }
       return;
@@ -260,6 +412,15 @@ export function createBackupsFeature(
   }
 
   elements.backupsTable.addEventListener('click', handleBackupsTableClick);
+  elements.masterDeleteButton.addEventListener('click', openMasterDeleteDialog);
+  elements.masterDeleteCancelBtn.addEventListener(
+    'click',
+    closeMasterDeleteDialog,
+  );
+  elements.masterDeleteForm.addEventListener(
+    'submit',
+    handleMasterDeleteSubmit,
+  );
 
   return {
     loadBackups,

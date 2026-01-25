@@ -147,6 +147,38 @@ async fn set_backup_note_command(
     run_blocking(move || backup::set_backup_note(&save_path, &backup_filename, note)).await
 }
 
+/// Tauri command to delete a specific backup.
+#[tauri::command(rename_all = "snake_case")]
+async fn delete_backup_command(
+    state: tauri::State<'_, ConfigState>,
+    backup_path: String,
+) -> Result<(), String> {
+    let save_path =
+        extract_save_path(&state)?.ok_or_else(|| "Save path not configured".to_string())?;
+    let path = PathBuf::from(&backup_path);
+
+    let verified_path = verify_backup_path(&save_path, &path)?;
+
+    run_blocking(move || backup::delete_backup_folder(&verified_path)).await
+}
+
+/// Tauri command to batch delete backups.
+#[tauri::command(rename_all = "snake_case")]
+async fn batch_delete_backups_command(
+    state: tauri::State<'_, ConfigState>,
+    game_numbers: Vec<u32>,
+    keep_latest: bool,
+    delete_locked: bool,
+) -> Result<usize, String> {
+    let save_path =
+        extract_save_path(&state)?.ok_or_else(|| "Save path not configured".to_string())?;
+
+    run_blocking(move || {
+        backup::delete_backups_batch(&save_path, &game_numbers, keep_latest, delete_locked)
+    })
+    .await
+}
+
 /// Command to initialize the watcher from the frontend.
 /// This ensures the watcher starts strictly after the UI is shown.
 #[tauri::command(rename_all = "snake_case")]
@@ -331,6 +363,8 @@ pub fn run() {
             restore_backup_command,
             toggle_backup_lock_command,
             set_backup_note_command,
+            delete_backup_command,
+            batch_delete_backups_command,
             init_watcher,
             game_manager::launch_game
         ])
