@@ -13,12 +13,38 @@ use std::path::PathBuf;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{async_runtime, Manager};
-#[cfg(target_os = "linux")]
 use tauri_plugin_notification::NotificationExt;
 use watcher::FileWatcher;
 
+use config::AppConfig;
+use std::path::Path;
+
 // Store tray icon to prevent it from being dropped
 struct TrayState(#[allow(dead_code)] tauri::tray::TrayIcon);
+
+/// Initializes the configuration, performing auto-detection if necessary.
+///
+/// If `save_path` is not set and the application is running on Windows,
+/// it attempts to detect the standard save location. If successful,
+/// the configuration is updated and saved to the specified path.
+fn bootstrap_config(config_path: &Path) -> AppConfig {
+    let mut config = config::load_config_from_path(config_path);
+
+    // Auto-detect save path if not set (Windows only)
+    #[cfg(target_os = "windows")]
+    if config.save_path.is_none() {
+        if let Some(path) = save_paths::detect_windows_local_save_path() {
+            let path_str = path.to_string_lossy().to_string();
+            log::info!("Auto-detected save path: {}", path_str);
+            config.save_path = Some(path_str);
+            if let Err(e) = config::save_config_to_path(&config, config_path) {
+                log::error!("Failed to save auto-detected config: {}", e);
+            }
+        }
+    }
+
+    config
+}
 
 /// Extracts the configured save path without holding the mutex across blocking work.
 fn extract_save_path(state: &tauri::State<'_, ConfigState>) -> Result<Option<PathBuf>, String> {
@@ -138,7 +164,8 @@ fn should_show_main_window_from_tray_event(event: &tauri::tray::TrayIconEvent) -
 /// Runs the Tauri application entry point.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let initial_config = config::load_initial_config();
+    let config_path = config::get_config_path();
+    let initial_config = bootstrap_config(&config_path);
     let watcher = FileWatcher::new();
 
     // Note: Watcher auto-start is deferred to the frontend init_watcher command
@@ -222,10 +249,22 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if let Err(e) = window.hide() {
-                    log::error!("Failed to hide window: {}", e);
-                }
                 api.prevent_close();
+
+                match window.hide() {
+                    Ok(_) => {
+                        let _ = window
+                            .app_handle()
+                            .notification()
+                            .builder()
+                            .title("ITD ODD Save Manager")
+                            .body("App minimized into the tray")
+                            .show();
+                    }
+                    Err(e) => {
+                        log::error!("Failed to hide window: {}", e);
+                    }
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -312,5 +351,96 @@ mod tests {
             caller_thread, worker_thread,
             "Blocking work should not execute on the caller thread"
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn bootstrap_config_detects_and_saves_path() {
+        use std::env;
+        use std::fs;
+        use std::sync::Mutex;
+
+        // Mutex to protect environment variable access
+        static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let mock_profile = temp_dir.path().join("UserProfile");
+        let config_path = temp_dir.path().join("config.json");
+
+        // Setup mock save directory structure
+        let expected_save_path = mock_profile
+            .join("AppData")
+            .join("LocalLow")
+            .join("PikPok")
+            .join("IntoTheDeadOurDarkestDays");
+        fs::create_dir_all(&expected_save_path).expect("failed to create mock save dir");
+
+        // Run within mutex lock
+        let _guard = ENV_MUTEX.lock().expect("env mutex locked");
+        let original_profile = env::var_os("USERPROFILE");
+        env::set_var("USERPROFILE", &mock_profile);
+
+        // Execute bootstrap with no existing config file
+        let config = bootstrap_config(&config_path);
+
+        // Restore env
+        if let Some(val) = original_profile {
+            env::set_var("USERPROFILE", val);
+        } else {
+            env::remove_var("USERPROFILE");
+        }
+
+        // Verify in-memory config
+        assert_eq!(
+            config.save_path,
+            Some(expected_save_path.to_string_lossy().to_string())
+        );
+
+        // Verify persisted config
+        let saved_config = config::load_config_from_path(&config_path);
+        assert_eq!(
+            saved_config.save_path,
+            Some(expected_save_path.to_string_lossy().to_string())
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn bootstrap_config_does_not_override_existing_path() {
+        use std::env;
+        use std::fs;
+        use std::sync::Mutex;
+
+        static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let config_path = temp_dir.path().join("config.json");
+
+        // Create existing config with a custom path
+        let existing_config = AppConfig {
+            save_path: Some("C:\\Custom\\Path".to_string()),
+            ..Default::default()
+        };
+        config::save_config_to_path(&existing_config, &config_path)
+            .expect("failed to save setup config");
+
+        // Even if we have a valid detection candidate, it should be ignored
+        let mock_profile = temp_dir.path().join("UserProfile");
+        let detected_path = mock_profile.join("AppData/LocalLow/PikPok/IntoTheDeadOurDarkestDays");
+        fs::create_dir_all(&detected_path).expect("failed to create mock save dir");
+
+        let _guard = ENV_MUTEX.lock().expect("env mutex locked");
+        let original = env::var_os("USERPROFILE");
+        env::set_var("USERPROFILE", &mock_profile);
+
+        let config = bootstrap_config(&config_path);
+
+        if let Some(val) = original {
+            env::set_var("USERPROFILE", val);
+        } else {
+            env::remove_var("USERPROFILE");
+        }
+
+        assert_eq!(config.save_path, Some("C:\\Custom\\Path".to_string()));
     }
 }

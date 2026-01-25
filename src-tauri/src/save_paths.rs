@@ -16,7 +16,7 @@ fn local_save_path_from_profile(user_profile: &Path) -> PathBuf {
 }
 
 /// Detects the local save path using the USERPROFILE environment variable.
-fn detect_windows_local_save_path() -> Option<PathBuf> {
+pub(crate) fn detect_windows_local_save_path() -> Option<PathBuf> {
     let user_profile = PathBuf::from(env::var_os("USERPROFILE")?);
     let path = local_save_path_from_profile(&user_profile);
     if path.is_dir() {

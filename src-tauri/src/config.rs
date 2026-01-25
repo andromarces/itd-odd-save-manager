@@ -24,7 +24,7 @@ pub struct AppConfig {
 pub struct ConfigState(pub Mutex<AppConfig>);
 
 /// Resolves the path to the configuration file.
-fn get_config_path() -> PathBuf {
+pub(crate) fn get_config_path() -> PathBuf {
     std::env::current_exe()
         .map(|p| config_path_for_exe(&p))
         .unwrap_or_else(|_| PathBuf::from("config.json"))
@@ -62,11 +62,6 @@ pub fn load_config_from_path(path: &Path) -> AppConfig {
         log::info!("Configuration file not found, using defaults");
     }
     AppConfig::default()
-}
-
-/// Loads the initial configuration from the default location.
-pub fn load_initial_config() -> AppConfig {
-    load_config_from_path(&get_config_path())
 }
 
 /// Validates if the provided string is a valid path (file or directory).
@@ -207,19 +202,23 @@ pub async fn set_game_settings(
 }
 
 /// Serializes and writes the configuration to disk.
-fn save_config(config: &AppConfig) -> Result<(), String> {
-    let config_path = get_config_path();
+pub(crate) fn save_config(config: &AppConfig) -> Result<(), String> {
+    save_config_to_path(config, &get_config_path())
+}
+
+/// Serializes and writes the configuration to a specific path.
+pub(crate) fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<(), String> {
     let json = serde_json::to_string_pretty(config).map_err(|e| {
         log::error!("Failed to serialize config: {}", e);
         format!("Failed to serialize config: {}", e)
     })?;
 
-    fs::write(&config_path, json).map_err(|e| {
+    fs::write(path, json).map_err(|e| {
         log::error!("Failed to write config file: {}", e);
         format!("Failed to write config file: {}", e)
     })?;
 
-    log::info!("Configuration saved successfully to {:?}", config_path);
+    log::info!("Configuration saved successfully to {:?}", path);
     Ok(())
 }
 
