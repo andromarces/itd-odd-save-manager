@@ -34,6 +34,8 @@ pub struct BackupInfo {
     pub game_number: u32,
     /// Whether the backup is locked (preventing auto-deletion).
     pub locked: bool,
+    /// The SHA-256 hash of the main save file.
+    pub hash: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -151,6 +153,7 @@ fn resolve_hash(
 fn should_skip_duplicate(
     index: &mut BackupIndex,
     backup_root: &Path,
+    save_dir: &Path,
     game_number: u32,
     hash: &str,
     calculated: bool,
@@ -187,6 +190,31 @@ fn should_skip_duplicate(
                 "Index pointed to missing backup {:?}, forcing new backup.",
                 last_backup_full_path
             );
+        }
+    }
+
+    // Fallback: Check all existing backups for this game to prevent duplicates after restore
+    if let Ok(backups) = get_backups(save_dir) {
+        for backup in backups {
+            if backup.game_number == game_number && backup.hash == hash {
+                log::info!(
+                    "Duplicate backup found for game {} in existing backup {}, skipping.",
+                    game_number,
+                    backup.filename
+                );
+
+                // Update index to point to this backup for future fast-path metadata matches
+                index.games.insert(
+                    game_number,
+                    IndexEntry {
+                        last_hash: hash.to_string(),
+                        last_source_size: source.size,
+                        last_source_modified: source.modified_nanos,
+                        last_backup_path: backup.filename.clone(),
+                    },
+                );
+                return true;
+            }
         }
     }
 
@@ -260,6 +288,9 @@ fn backup_info_from_folder(
         .len();
 
     let locked = path.join(LOCKED_FILE_NAME).exists();
+    let hash = fs::read_to_string(path.join(HASH_FILE_NAME))
+        .map(|h| h.trim().to_string())
+        .unwrap_or_default();
 
     Ok(Some(BackupInfo {
         path: path.to_string_lossy().to_string(),
@@ -273,6 +304,7 @@ fn backup_info_from_folder(
         modified: info.timestamp.to_rfc3339(),
         game_number: info.game_number,
         locked,
+        hash,
     }))
 }
 
@@ -337,7 +369,15 @@ pub(crate) fn perform_backup_for_game_internal(
 
     let source = read_source_metadata(&paths.main_path)?;
     let (hash, calculated) = resolve_hash(index, game_number, &source, &paths.main_path)?;
-    if should_skip_duplicate(index, backup_root, game_number, &hash, calculated, &source) {
+    if should_skip_duplicate(
+        index,
+        backup_root,
+        save_dir,
+        game_number,
+        &hash,
+        calculated,
+        &source,
+    ) {
         return Ok(None);
     }
 
@@ -899,5 +939,53 @@ mod tests {
         check_content(&backups_final[1], "data 3");
 
         check_content(&backups_final[2], "data 1");
+    }
+
+    /// Tests that restoring an older backup does not result in a new duplicate backup.
+    #[test]
+    fn test_no_duplicate_after_restore() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 0;
+        let main_sav = save_dir.join("gamesave_0.sav");
+
+        // 1. Create first backup
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "version 1").unwrap();
+        }
+        let backup1_path = perform_backup_for_game(save_dir, game_number, 100)
+            .unwrap()
+            .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        // 2. Modify and create second backup
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "version 2").unwrap();
+        }
+        let _backup2_path = perform_backup_for_game(save_dir, game_number, 100)
+            .unwrap()
+            .unwrap();
+
+        // 3. Restore first backup
+        restore_backup(&backup1_path, save_dir).unwrap();
+
+        // 4. Try to backup again - it should be skipped because it matches backup 1
+        let result = perform_backup_for_game(save_dir, game_number, 100).unwrap();
+        assert!(
+            result.is_none(),
+            "Backup should have been skipped as it matches an existing backup (v1)"
+        );
+
+        // 5. Verify index was updated to point to backup 1
+        let backup_root = save_dir.join(".backups");
+        let index = load_index(&backup_root);
+        let entry = index.games.get(&game_number).unwrap();
+        assert_eq!(
+            entry.last_backup_path,
+            backup1_path.file_name().unwrap().to_string_lossy()
+        );
     }
 }

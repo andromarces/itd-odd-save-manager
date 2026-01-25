@@ -45,6 +45,8 @@ describe('restore confirmation message', () => {
       size: 1024,
       modified: '2025-01-01T12:00:00Z',
       game_number: 0,
+      locked: false,
+      hash: 'mock-hash',
     });
 
     const lines = message.split('\n');
@@ -68,6 +70,8 @@ describe('restore confirmation message', () => {
       size: 1024,
       modified: '2025-01-01T12:00:00Z',
       game_number: 1,
+      locked: false,
+      hash: 'mock-hash',
     });
 
     expect(label).toBe('Game 2');
