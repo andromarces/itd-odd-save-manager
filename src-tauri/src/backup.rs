@@ -4,6 +4,7 @@ use crate::filename_utils;
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use std::time::SystemTime;
 
 const BACKUP_DIR_NAME: &str = ".backups";
 const HASH_FILE_NAME: &str = ".hash";
+const INDEX_FILE_NAME: &str = "index.json";
 
 /// Represents metadata for a backup entry.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -29,6 +31,40 @@ pub struct BackupInfo {
     pub modified: String,
     /// The game number (0-based for internal logic).
     pub game_number: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+struct BackupIndex {
+    games: HashMap<u32, IndexEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct IndexEntry {
+    last_hash: String,
+    last_source_size: u64,
+    last_source_modified: u128, // Unix timestamp in nanoseconds
+    last_backup_path: String,   // Relative folder name of the last backup
+}
+
+/// Loads the backup index from disk.
+fn load_index(backup_root: &Path) -> BackupIndex {
+    let index_path = backup_root.join(INDEX_FILE_NAME);
+    if index_path.exists() {
+        if let Ok(content) = fs::read_to_string(&index_path) {
+            if let Ok(index) = serde_json::from_str(&content) {
+                return index;
+            }
+        }
+    }
+    BackupIndex::default()
+}
+
+/// Saves the backup index to disk.
+fn save_index(backup_root: &Path, index: &BackupIndex) {
+    let index_path = backup_root.join(INDEX_FILE_NAME);
+    if let Ok(content) = serde_json::to_string_pretty(index) {
+        let _ = fs::write(index_path, content);
+    }
 }
 
 /// Backs up a specific game slot by directory and game number.
@@ -72,56 +108,92 @@ pub fn perform_backup_for_game(
         return Ok(None);
     }
 
-    // Calculate hash of main save
-    let hash = calculate_hash(&main_path)?;
-
-    // Check for existing duplicates in .backups
     let backup_root = save_dir.join(BACKUP_DIR_NAME);
-    // Display number is 1-based (Internal 0 -> Game 1)
-    let display_number = game_number + 1;
-    let folder_prefix = format!("Game {} -", display_number);
+    if !backup_root.exists() {
+        fs::create_dir_all(&backup_root).map_err(|e| e.to_string())?;
+    }
 
-    if backup_root.exists() {
-        if let Ok(entries) = fs::read_dir(&backup_root) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    // Check if this folder belongs to the same game number (optimization)
-                    // Folder format: "Game {N} - ..."
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if !name.starts_with(&folder_prefix) {
-                            continue;
-                        }
-                    }
+    let mut index = load_index(&backup_root);
 
-                    let hash_path = path.join(HASH_FILE_NAME);
-                    if hash_path.exists() {
-                        if let Ok(existing_hash) = fs::read_to_string(&hash_path) {
-                            if existing_hash.trim() == hash {
-                                log::info!(
-                                    "Duplicate backup found for game {} (hash match), skipping.",
-                                    game_number
-                                );
-                                return Ok(None);
-                            }
-                        }
-                    }
+    // Get metadata of main save
+    let metadata = fs::metadata(&main_path).map_err(|e| e.to_string())?;
+    let size = metadata.len();
+    let mtime = metadata
+        .modified()
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    let mut hash = String::new();
+    let mut calculated = false;
+
+    // Check index for short-circuiting
+    if let Some(entry) = index.games.get(&game_number) {
+        if entry.last_source_size == size && entry.last_source_modified == mtime {
+            // Metadata matches, assume hash is same
+            hash = entry.last_hash.clone();
+            log::debug!(
+                "Metadata match for game {}: skipping hash calculation.",
+                game_number
+            );
+        }
+    }
+
+    if hash.is_empty() {
+        hash = calculate_hash(&main_path)?;
+        calculated = true;
+    }
+
+    // Check for duplicates using index
+    if let Some(entry) = index.games.get(&game_number) {
+        if entry.last_hash == hash {
+            // Check if the referenced backup folder actually exists
+            let last_backup_full_path = backup_root.join(&entry.last_backup_path);
+            if last_backup_full_path.exists() {
+                // If we calculated it, update metadata in index if it was stale
+                if calculated
+                    && (entry.last_source_size != size || entry.last_source_modified != mtime)
+                {
+                    index.games.insert(
+                        game_number,
+                        IndexEntry {
+                            last_hash: hash,
+                            last_source_size: size,
+                            last_source_modified: mtime,
+                            last_backup_path: entry.last_backup_path.clone(),
+                        },
+                    );
+                    save_index(&backup_root, &index);
                 }
+
+                log::info!(
+                    "Duplicate backup found for game {} (index match), skipping.",
+                    game_number
+                );
+                return Ok(None);
+            } else {
+                log::warn!(
+                    "Index pointed to missing backup {:?}, forcing new backup.",
+                    last_backup_full_path
+                );
+                // Proceed to create new backup
             }
         }
     }
 
     // Proceed with backup
-    // Get modification time of main save for folder naming
-    let metadata = fs::metadata(&main_path).map_err(|e| e.to_string())?;
-    let modified: DateTime<Local> = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
+    let display_number = game_number + 1;
+    let folder_prefix = format!("Game {} -", display_number);
 
+    let modified_dt: DateTime<Local> = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
     // Format: Game N - dd-MMM-yyyy hh-mm-ss AM
-    // e.g. Game 1 - 03-Jan-2026 01-09-05 AM
-    let timestamp_str = modified.format("%d-%b-%Y %I-%M-%S %p").to_string();
+    let timestamp_str = modified_dt.format("%d-%b-%Y %I-%M-%S %p").to_string();
     let folder_name = format!("{} {}", folder_prefix.trim(), timestamp_str);
 
     let target_dir = backup_root.join(&folder_name);
+    // If target dir already exists (e.g. fast updates within same second), we might overwrite or fail.
+    // fs::create_dir_all succeeds if exists.
     fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
 
     // Copy files
@@ -132,6 +204,18 @@ pub fn perform_backup_for_game(
 
     // Write hash
     fs::write(target_dir.join(HASH_FILE_NAME), &hash).map_err(|e| e.to_string())?;
+
+    // Update Index
+    index.games.insert(
+        game_number,
+        IndexEntry {
+            last_hash: hash,
+            last_source_size: size,
+            last_source_modified: mtime,
+            last_backup_path: folder_name,
+        },
+    );
+    save_index(&backup_root, &index);
 
     log::info!(
         "Backup created for game {} at {:?}",
@@ -334,6 +418,10 @@ mod tests {
         assert!(backup_folder.join("gamesave_1.sav").exists());
         assert!(backup_folder.join(".hash").exists());
 
+        // Verify index was created
+        let index_path = save_dir.join(".backups").join("index.json");
+        assert!(index_path.exists());
+
         // 2. Perform duplicate backup (should skip)
         let result_dup = perform_backup_for_game(save_dir, game_number).unwrap();
         assert!(result_dup.is_none());
@@ -432,5 +520,40 @@ mod tests {
         // Just verify it's a hex string.
         assert!(content.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(!content.contains("Sha256")); // Should not contain struct debug info
+    }
+
+    /// Tests robustness against missing backup folders when index exists.
+    #[test]
+    fn test_missing_backup_folder_recovery() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 1;
+
+        let main_sav = save_dir.join("gamesave_1.sav");
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "important data").unwrap();
+        }
+
+        // 1. Create initial backup
+        let result = perform_backup_for_game(save_dir, game_number).unwrap();
+        let backup_folder = result.unwrap();
+
+        // 2. Simulate user deleting the backup folder manually, but index remains
+        fs::remove_dir_all(&backup_folder).unwrap();
+
+        // 3. Perform backup again - should detect missing folder and recreate
+        let result_retry = perform_backup_for_game(save_dir, game_number).unwrap();
+        assert!(result_retry.is_some());
+        let new_backup_folder = result_retry.unwrap();
+
+        assert!(new_backup_folder.exists());
+        let restored_sav = new_backup_folder.join("gamesave_1.sav");
+        assert!(restored_sav.exists());
+        assert!(new_backup_folder.join(".hash").exists());
+
+        // Verify content matches original
+        let content = fs::read_to_string(restored_sav).unwrap();
+        assert_eq!(content.trim(), "important data");
     }
 }

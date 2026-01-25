@@ -97,6 +97,9 @@ impl FileWatcher {
 /// * `rx` - Receiver for file system events.
 /// * `save_dir` - The directory being watched.
 fn debounce_loop(rx: Receiver<notify::Result<notify::Event>>, save_dir: PathBuf) {
+    // Defer initial scan to improve startup responsiveness
+    thread::sleep(Duration::from_secs(3));
+
     // Initial Scan: Check for existing saves that need backup
     info!("Performing initial scan of {:?}", save_dir);
     if let Ok(entries) = std::fs::read_dir(&save_dir) {
@@ -151,8 +154,10 @@ fn debounce_loop(rx: Receiver<notify::Result<notify::Event>>, save_dir: PathBuf)
                 let mut relevant_event = false;
                 for path in event.paths {
                     if let Some(info) = filename_utils::parse_path(&path) {
-                        pending_games.insert(info.game_number);
-                        relevant_event = true;
+                        if !info.is_bak {
+                            pending_games.insert(info.game_number);
+                            relevant_event = true;
+                        }
                     }
                 }
 
@@ -187,17 +192,25 @@ mod tests {
         watcher.stop();
     }
 
-    /// Tests that only valid save filenames trigger the relevance logic.
+    /// Tests the path parsing logic that underpins the debounce loop's filtering.
+    /// The debounce_loop (private) uses `!info.is_bak` to ignore backup files.
     #[test]
-    fn test_debounce_filtering_logic() {
-        // Direct testing of the filtering logic used in debounce_loop
+    fn test_filename_parsing_for_filtering() {
         let path_valid = PathBuf::from("gamesave_1.sav");
         let path_bak = PathBuf::from("gamesave_1.sav.bak");
         let path_invalid = PathBuf::from("other.txt");
         let path_invalid_fmt = PathBuf::from("gamesave_abc.sav");
 
-        assert!(filename_utils::parse_path(&path_valid).is_some());
-        assert!(filename_utils::parse_path(&path_bak).is_some());
+        let valid_info = filename_utils::parse_path(&path_valid).unwrap();
+        assert!(
+            !valid_info.is_bak,
+            "Main save file should not be marked as bak"
+        );
+
+        let bak_info = filename_utils::parse_path(&path_bak).unwrap();
+        assert!(bak_info.is_bak, "Backup file should be marked as bak");
+
+        // These return None, so they are filtered out implicitly by the `if let Some` check
         assert!(filename_utils::parse_path(&path_invalid).is_none());
         assert!(filename_utils::parse_path(&path_invalid_fmt).is_none());
     }

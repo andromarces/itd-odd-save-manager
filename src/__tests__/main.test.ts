@@ -54,6 +54,25 @@ describe('restore confirmation message', () => {
   });
 
   /**
+   * Verifies the display label for backup rows.
+   */
+  it('uses a game label for backups', async () => {
+    const { getBackupDisplayName } = await import('../main');
+
+    const label = getBackupDisplayName({
+      path: 'C:\\Backups\\gamesave_1.sav',
+      filename: 'gamesave_1.sav',
+      original_filename: 'gamesave_1.sav',
+      original_path: 'C:\\Saves\\gamesave_1.sav',
+      size: 1024,
+      modified: '2025-01-01T12:00:00Z',
+      game_number: 1,
+    });
+
+    expect(label).toBe('Game 2');
+  });
+
+  /**
    * Verifies that auto-detection is hidden when unsupported.
    */
   it('hides auto-detection when unsupported', async () => {

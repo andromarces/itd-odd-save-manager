@@ -52,6 +52,31 @@ fn restore_backup_command(backup_path: String, target_path: String) -> Result<()
     backup::restore_backup(&backup, &target_dir)
 }
 
+/// Command to initialize the watcher from the frontend.
+/// This ensures the watcher starts strictly after the UI is shown.
+#[tauri::command(rename_all = "snake_case")]
+fn init_watcher(app: tauri::AppHandle, state: tauri::State<ConfigState>) -> Result<(), String> {
+    // Hard guarantee: Ensure the window is actually visible before starting
+    if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(false) {
+            return Err("Watcher initialization deferred: window not yet visible".to_string());
+        }
+    }
+
+    let config = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock config: {}", e))?;
+    if let Some(path_str) = &config.save_path {
+        let path = PathBuf::from(path_str);
+        if path.exists() {
+            let watcher = app.state::<FileWatcher>();
+            watcher.start(path)?;
+        }
+    }
+    Ok(())
+}
+
 /// Helper to show and focus the main window.
 fn show_main_window(app: &tauri::AppHandle, _from_second_instance: bool) {
     if let Some(window) = app.get_webview_window("main") {
@@ -97,13 +122,8 @@ pub fn run() {
     let initial_config = config::load_initial_config();
     let watcher = FileWatcher::new();
 
-    // Auto-start watcher if path exists
-    if let Some(path_str) = &initial_config.save_path {
-        let path = PathBuf::from(path_str);
-        if path.exists() {
-            let _ = watcher.start(path);
-        }
-    }
+    // Note: Watcher auto-start is deferred to the frontend init_watcher command
+    // to ensure it runs strictly after the UI is shown.
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -195,6 +215,7 @@ pub fn run() {
             config::validate_path,
             get_backups_command,
             restore_backup_command,
+            init_watcher,
             game_manager::launch_game
         ])
         .run(tauri::generate_context!())

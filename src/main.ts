@@ -1,6 +1,10 @@
 // ITD ODD Save Manager by andromarces
 
 import { invoke } from '@tauri-apps/api/core';
+import {
+  getInvokeErrorMessage,
+  isInitWatcherDeferredError,
+} from './watcher_init';
 import './style.css';
 
 interface AppConfig {
@@ -195,6 +199,13 @@ function formatDate(isoString: string): string {
 }
 
 /**
+ * Returns the display label for a backup entry.
+ */
+export function getBackupDisplayName(backup: BackupInfo): string {
+  return `Game ${backup.game_number + 1}`;
+}
+
+/**
  * Builds the restore confirmation message for a backup.
  */
 export function buildRestoreConfirmationMessage(backup: BackupInfo): string {
@@ -219,7 +230,7 @@ function renderBackups(backups: BackupInfo[]): void {
     const row = document.createElement('tr');
 
     const fileCell = document.createElement('td');
-    fileCell.textContent = backup.original_filename;
+    fileCell.textContent = getBackupDisplayName(backup);
     fileCell.title = backup.filename;
 
     const dateCell = document.createElement('td');
@@ -294,6 +305,39 @@ async function safeInvoke<T>(
 
     return undefined;
   }
+}
+
+/**
+ * Initializes the watcher after the UI is painted, retrying until visible.
+ */
+function initWatcherAfterPaint(): void {
+  /**
+   * Attempts watcher initialization and retries if the UI is not visible yet.
+   */
+  const retryInitWatcher = (attempt: number): void => {
+    void invoke('init_watcher')
+      .then(() => {
+        logActivity('Watcher initialized.');
+      })
+      .catch((error) => {
+        const message = getInvokeErrorMessage(error);
+        if (isInitWatcherDeferredError(message)) {
+          const delayMs = Math.min(1000, 50 + attempt * 50);
+          setTimeout(() => {
+            retryInitWatcher(attempt + 1);
+          }, delayMs);
+          return;
+        }
+
+        logActivity(`Failed to initialize watcher: ${message}`);
+      });
+  };
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      retryInitWatcher(0);
+    });
+  });
 }
 
 /**
@@ -622,3 +666,6 @@ export async function applyAutoDetectionAvailability(): Promise<void> {
 // Initial load
 void applyAutoDetectionAvailability();
 void loadConfig();
+
+// Initialize watcher strictly after UI is shown (post-paint)
+initWatcherAfterPaint();

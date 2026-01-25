@@ -46,6 +46,12 @@ pub fn start_monitor<R: Runtime>(app: AppHandle<R>) {
                 state.0.lock().map(|c| c.auto_close).unwrap_or(false)
             };
 
+            let poll_interval = if should_auto_close {
+                Duration::from_secs(5)
+            } else {
+                Duration::from_secs(30)
+            };
+
             // Check if game is running
             sys.refresh_processes(ProcessesToUpdate::All, true);
             let processes = sys.processes();
@@ -73,7 +79,7 @@ pub fn start_monitor<R: Runtime>(app: AppHandle<R>) {
                 }
             }
 
-            thread::sleep(Duration::from_secs(5));
+            thread::sleep(poll_interval);
         }
     });
 }
