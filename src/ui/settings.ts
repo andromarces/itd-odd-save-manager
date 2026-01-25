@@ -1,4 +1,4 @@
-import { logActivity, safeInvoke } from '../ui_utils';
+import { invokeAction, logActivity } from '../ui_utils';
 import type { AppElements } from './dom';
 
 type SettingsElements = Pick<
@@ -19,17 +19,17 @@ export function setupSettingsFeature(elements: SettingsElements): void {
     const rawMax = parseInt(elements.maxBackupsInput.value, 10);
     const maxBackups = isNaN(rawMax) ? 100 : rawMax;
 
-    await safeInvoke(
+    await invokeAction(
       'set_game_settings',
       {
         auto_launch_game: autoLaunch,
         auto_close: autoClose,
         max_backups_per_game: maxBackups,
       },
+      'save game settings',
       {
-        actionName: 'save game settings',
         successLog: `Updated game settings: Auto-Launch=${autoLaunch}, Auto-Close=${autoClose}, Max-Backups=${maxBackups}`,
-      },
+      }
     );
   }
 
@@ -38,8 +38,7 @@ export function setupSettingsFeature(elements: SettingsElements): void {
    */
   async function launchGame(): Promise<void> {
     logActivity('Launching game...');
-    await safeInvoke('launch_game', undefined, {
-      actionName: 'launch game',
+    await invokeAction('launch_game', undefined, 'launch game', {
       successLog: 'Game launch command sent.',
       alertOnError: true,
     });

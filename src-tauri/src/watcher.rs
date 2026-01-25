@@ -5,7 +5,7 @@ use crate::filename_utils;
 use log::{error, info};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
@@ -32,26 +32,16 @@ impl FileWatcher {
     }
 
     /// Starts watching the specified path.
-    ///
-    /// Expects a directory path usually, but handles file path by watching parent.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The path to watch.
-    /// * `limit` - The maximum number of backups per game.
     pub fn start(&self, path: PathBuf, limit: usize) -> Result<(), String> {
-        // Stop existing if any
         self.stop();
 
         let (tx, rx) = channel();
 
-        // Init watcher
         let mut watcher = notify::recommended_watcher(move |res| {
             let _ = tx.send(res);
         })
         .map_err(|e| e.to_string())?;
 
-        // Normalize path (always watch directory)
         let watch_target = crate::filename_utils::normalize_to_directory(&path)
             .map_err(|e| format!("Invalid watch target: {}", e))?;
 
@@ -59,20 +49,16 @@ impl FileWatcher {
             return Err(format!("Watch target does not exist: {:?}", watch_target));
         }
 
-        // Watch non-recursively
         if let Err(e) = watcher.watch(&watch_target, RecursiveMode::NonRecursive) {
             return Err(format!("Failed to watch path: {}", e));
         }
 
-        // Store watcher
-        // Safe lock: if poisoned, we can't really recover the state, but we return error
         let mut watcher_guard = self
             .watcher
             .lock()
             .map_err(|_| "Failed to lock watcher state".to_string())?;
         *watcher_guard = Some(watcher);
 
-        // Create a fresh shutdown token for this thread to avoid clearing prior signals
         let shutdown_token = Arc::new(AtomicBool::new(false));
         {
             let mut shutdown_guard = self
@@ -82,7 +68,6 @@ impl FileWatcher {
             *shutdown_guard = shutdown_token.clone();
         }
 
-        // Spawn debouncing thread
         thread::spawn(move || {
             debounce_loop(rx, watch_target, shutdown_token, limit);
         });
@@ -93,7 +78,6 @@ impl FileWatcher {
 
     /// Stops the current watcher, if active.
     pub fn stop(&self) {
-        // Signal shutdown to the debouncing thread
         match self.shutdown.lock() {
             Ok(shutdown_guard) => {
                 shutdown_guard.store(true, Ordering::SeqCst);
@@ -113,8 +97,6 @@ impl FileWatcher {
     }
 
     /// Returns the current shutdown token for test assertions.
-    ///
-    /// If the mutex is poisoned, the inner value is recovered to avoid panics in tests.
     #[cfg(test)]
     fn debug_shutdown_token(&self) -> Arc<AtomicBool> {
         match self.shutdown.lock() {
@@ -130,49 +112,46 @@ impl FileWatcher {
     }
 }
 
+/// Executes backups for a set of games with a shared index load and save.
+fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: usize) {
+    if game_numbers.is_empty() {
+        return;
+    }
+
+    if let Ok(backup_root) = ensure_backup_root(save_dir) {
+        let mut index = load_index(&backup_root);
+        for &game_number in game_numbers {
+            if let Err(e) = perform_backup_for_game_internal(
+                save_dir,
+                &backup_root,
+                game_number,
+                &mut index,
+                limit,
+            ) {
+                error!("Backup failed for game {}: {}", game_number, e);
+            }
+        }
+        save_index(&backup_root, &index);
+    }
+}
+
 /// Performs an immediate scan of the directory and backs up any existing save files.
-/// Uses a batch approach to load/save the index only once.
-pub(crate) fn scan_and_backup_existing(save_dir: &PathBuf, limit: usize) {
+pub(crate) fn scan_and_backup_existing(save_dir: &Path, limit: usize) {
     info!("Performing initial scan of {:?}", save_dir);
     if let Ok(entries) = std::fs::read_dir(save_dir) {
-        if let Ok(backup_root) = ensure_backup_root(save_dir) {
-            let mut index = load_index(&backup_root);
-
-            for entry in entries.flatten() {
-                let path = entry.path();
-                // We only care about main save files for the trigger,
-                // perform_backup_for_game handles the rest.
-                if let Some(info) = filename_utils::parse_path(&path) {
-                    if !info.is_bak {
-                        if let Err(e) = perform_backup_for_game_internal(
-                            save_dir,
-                            &backup_root,
-                            info.game_number,
-                            &mut index,
-                            limit,
-                        ) {
-                            error!("Initial backup failed for game {}: {}", info.game_number, e);
-                        }
-                    }
+        let mut pending_games = HashSet::new();
+        for entry in entries.flatten() {
+            if let Some(info) = filename_utils::parse_path(&entry.path()) {
+                if !info.is_bak {
+                    pending_games.insert(info.game_number);
                 }
             }
-
-            save_index(&backup_root, &index);
         }
+        perform_batch_backups(save_dir, &pending_games, limit);
     }
 }
 
 /// Runs the debounce loop to process file system events.
-///
-/// It performs an initial scan for existing save files and then listens for
-/// file system events, aggregating them to trigger backups.
-///
-/// # Arguments
-///
-/// * `rx` - Receiver for file system events.
-/// * `save_dir` - The directory being watched.
-/// * `shutdown` - Atomic boolean to signal shutdown.
-/// * `limit` - The backup limit per game.
 fn debounce_loop(
     rx: Receiver<notify::Result<notify::Event>>,
     save_dir: PathBuf,
@@ -195,41 +174,23 @@ fn debounce_loop(
         let timeout = if pending_change {
             let elapsed = last_change_time.elapsed();
             if elapsed >= DEBOUNCE_DURATION {
-                // Trigger Backups
                 info!(
                     "Debounce timeout. Backing up {} games.",
                     pending_games.len()
                 );
-
-                if let Ok(backup_root) = crate::backup::ensure_backup_root(&save_dir) {
-                    let mut index = crate::backup::load_index(&backup_root);
-                    for game_number in pending_games.iter() {
-                        if let Err(e) = perform_backup_for_game_internal(
-                            &save_dir,
-                            &backup_root,
-                            *game_number,
-                            &mut index,
-                            limit,
-                        ) {
-                            error!("Backup failed for game {}: {}", game_number, e);
-                        }
-                    }
-                    crate::backup::save_index(&backup_root, &index);
-                }
-
+                perform_batch_backups(&save_dir, &pending_games, limit);
                 pending_games.clear();
                 pending_change = false;
-                Duration::from_secs(60) // Idle wait
+                Duration::from_secs(60)
             } else {
                 DEBOUNCE_DURATION - elapsed
             }
         } else {
-            Duration::from_secs(60) // Idle wait with periodic shutdown check
+            Duration::from_secs(60)
         };
 
         match rx.recv_timeout(timeout) {
             Ok(Ok(event)) => {
-                // Check for relevance
                 let mut relevant_event = false;
                 for path in event.paths {
                     if let Some(info) = filename_utils::parse_path(&path) {
@@ -246,12 +207,8 @@ fn debounce_loop(
                 }
             }
             Ok(Err(e)) => error!("Watch error: {:?}", e),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                // Loop continues
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                break;
-            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
 }
@@ -262,17 +219,16 @@ mod tests {
     use std::sync::atomic::Ordering;
     use tempfile::tempdir;
 
-    /// Tests that the watcher starts and stops without error.
+    /// Verifies that FileWatcher can start and stop without error.
     #[test]
     fn test_file_watcher_lifecycle() {
         let watcher = FileWatcher::new();
         let dir = tempdir().unwrap();
-        // Just verify it doesn't panic on start/stop
         assert!(watcher.start(dir.path().to_path_buf(), 100).is_ok());
         watcher.stop();
     }
 
-    /// Tests that a stop signal is not cleared by a subsequent start.
+    /// Ensures that a previous shutdown token remains signaled after restarting the watcher.
     #[test]
     fn test_shutdown_signal_not_cleared_by_restart() {
         let watcher = FileWatcher::new();
@@ -294,7 +250,7 @@ mod tests {
         );
     }
 
-    /// Tests that debug access does not panic if the shutdown mutex is poisoned.
+    /// Confirms that debug_shutdown_token does not panic when the mutex is poisoned.
     #[test]
     fn test_debug_shutdown_token_handles_poisoned_lock() {
         let watcher = FileWatcher::new();
@@ -313,8 +269,7 @@ mod tests {
         );
     }
 
-    /// Tests the path parsing logic that underpins the debounce loop's filtering.
-    /// The debounce_loop (private) uses `!info.is_bak` to ignore backup files.
+    /// Validates that filename parsing correctly identifies save files and backup files.
     #[test]
     fn test_filename_parsing_for_filtering() {
         let path_valid = PathBuf::from("gamesave_1.sav");
@@ -331,33 +286,28 @@ mod tests {
         let bak_info = filename_utils::parse_path(&path_bak).unwrap();
         assert!(bak_info.is_bak, "Backup file should be marked as bak");
 
-        // These return None, so they are filtered out implicitly by the `if let Some` check
         assert!(filename_utils::parse_path(&path_invalid).is_none());
         assert!(filename_utils::parse_path(&path_invalid_fmt).is_none());
     }
 
-    /// Tests that the batched initial scan backs up all existing files.
+    /// Checks that scan_and_backup_existing backs up multiple save files correctly.
     #[test]
     fn test_initial_scan_batch_processing() {
         let dir = tempdir().unwrap();
         let save_dir = dir.path().to_path_buf();
 
-        // Create two save files
         let save1 = save_dir.join("gamesave_1.sav");
         let save2 = save_dir.join("gamesave_2.sav");
         std::fs::write(&save1, "data1").unwrap();
         std::fs::write(&save2, "data2").unwrap();
 
-        // Run the scan
         scan_and_backup_existing(&save_dir, 100);
 
-        // Verify backups created
         let backups_dir = save_dir.join(".backups");
         assert!(backups_dir.exists());
         let index_path = backups_dir.join("index.json");
         assert!(index_path.exists());
 
-        // Verify that backups were actually registered
         let backups = crate::backup::get_backups(&save_dir, true).unwrap();
         assert_eq!(backups.len(), 2);
 
@@ -366,7 +316,7 @@ mod tests {
         assert!(games.contains(&2));
     }
 
-    /// Tests that the initial scan happens promptly (no artificial delay).
+    /// Ensures the initial scan runs promptly after starting the watcher.
     #[test]
     fn test_initial_scan_is_prompt() {
         let dir = tempdir().unwrap();
@@ -379,8 +329,6 @@ mod tests {
 
         watcher.start(save_dir.clone(), 100).unwrap();
 
-        // Poll for backup folder with a 1.5-second timeout
-        // (well below the previous 3s threshold)
         let mut found = false;
         for _ in 0..15 {
             if save_dir.join(".backups").exists() {

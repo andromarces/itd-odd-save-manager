@@ -35,11 +35,27 @@ export function createConfigFeature(
   /**
    * Updates the configuration status message.
    */
-  function setConfigStatus(message: string, type: StatusType = 'info'): void {
+  function setStatus(message: string, type: StatusType = 'info'): void {
     elements.configStatus.textContent = message;
-    elements.configStatus.className = 'status-text';
-    if (type !== 'info') {
-      elements.configStatus.classList.add(type);
+    elements.configStatus.className = `status-text ${type !== 'info' ? type : ''}`.trim();
+  }
+
+  /**
+   * Helper to manage button state during async operations.
+   */
+  async function withBusyButton(
+    btn: HTMLButtonElement,
+    busyText: string,
+    action: () => Promise<void>
+  ): Promise<void> {
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = busyText;
+    try {
+      await action();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
     }
   }
 
@@ -73,18 +89,18 @@ export function createConfigFeature(
   async function loadConfig(): Promise<void> {
     const config = await safeInvoke<AppConfig>('get_config', undefined, {
       actionName: 'load config',
-      onError: () => setConfigStatus('Failed to load configuration.', 'error'),
+      onError: () => setStatus('Failed to load configuration.', 'error'),
     });
 
     if (!config) return;
 
     if (config.save_path) {
       elements.manualInput.value = config.save_path;
-      setConfigStatus('Configuration loaded.', 'info');
+      setStatus('Configuration loaded.', 'info');
       void deps.loadBackups();
     } else {
       elements.manualInput.value = '';
-      setConfigStatus('No save path configured.', 'info');
+      setStatus('No save path configured.', 'info');
     }
 
     elements.autoLaunchCheck.checked = config.auto_launch_game;
@@ -100,27 +116,26 @@ export function createConfigFeature(
   async function savePath(): Promise<void> {
     const path = elements.manualInput.value.trim();
     if (!path) {
-      setConfigStatus('Please enter a path.', 'error');
+      setStatus('Please enter a path.', 'error');
       return;
     }
 
-    setConfigStatus('Validating...', 'info');
-    elements.saveButton.disabled = true;
-
-    try {
+    await withBusyButton(elements.saveButton, 'Validating...', async () => {
+      setStatus('Validating...', 'info');
+      
       const isValid = await safeInvoke<boolean>(
         'validate_path',
         { path },
         {
           actionName: 'validate path',
-          onError: () => setConfigStatus('Error validating path.', 'error'),
+          onError: () => setStatus('Error validating path.', 'error'),
         },
       );
 
       if (isValid === undefined) return;
 
       if (!isValid) {
-        setConfigStatus('Path does not exist or is invalid.', 'error');
+        setStatus('Path does not exist or is invalid.', 'error');
         logActivity(`Invalid path entered: ${path}`);
         return;
       }
@@ -131,7 +146,7 @@ export function createConfigFeature(
         {
           actionName: 'save path',
           onError: () => {
-            setConfigStatus('Error saving path.', 'error');
+            setStatus('Error saving path.', 'error');
             void loadConfig();
           },
         },
@@ -140,49 +155,44 @@ export function createConfigFeature(
       if (!normalizedPath) return;
 
       elements.manualInput.value = normalizedPath;
-      setConfigStatus('Save path updated successfully.', 'success');
+      setStatus('Save path updated successfully.', 'success');
       logActivity(`Save path updated: ${normalizedPath}`);
       void deps.loadBackups();
-    } finally {
-      elements.saveButton.disabled = false;
-    }
+    });
   }
 
   /**
    * Calls the backend command to detect save paths and updates the UI.
    */
   async function detectSteamSavePaths(): Promise<void> {
-    elements.detectButton.disabled = true;
-    elements.detectButton.textContent = 'Scanning...';
-    logActivity('Scanning for save paths...');
+    await withBusyButton(elements.detectButton, 'Scanning...', async () => {
+      logActivity('Scanning for save paths...');
 
-    const paths = await safeInvoke<string[]>(
-      'detect_steam_save_paths',
-      undefined,
-      {
-        actionName: 'detect save paths',
-        onError: () => {
-          elements.pathsList.innerHTML =
-            '<li class="error">Detection failed</li>';
+      const paths = await safeInvoke<string[]>(
+        'detect_steam_save_paths',
+        undefined,
+        {
+          actionName: 'detect save paths',
+          onError: () => {
+            elements.pathsList.innerHTML =
+              '<li class="error">Detection failed</li>';
+          },
         },
-      },
-    );
+      );
 
-    if (paths) {
-      renderPaths(paths);
-      if (paths.length > 0) {
-        logActivity(`Detected ${paths.length} potential paths.`);
-        if (!elements.manualInput.value) {
-          elements.manualInput.value = paths[0];
-          setConfigStatus('Path detected. Click "Set Path" to save.', 'info');
+      if (paths) {
+        renderPaths(paths);
+        if (paths.length > 0) {
+          logActivity(`Detected ${paths.length} potential paths.`);
+          if (!elements.manualInput.value) {
+            elements.manualInput.value = paths[0];
+            setStatus('Path detected. Click "Set Path" to save.', 'info');
+          }
+        } else {
+          logActivity('No paths detected.');
         }
-      } else {
-        logActivity('No paths detected.');
       }
-    }
-
-    elements.detectButton.disabled = false;
-    elements.detectButton.textContent = 'Auto Detect Save Path';
+    });
   }
 
   /**
@@ -202,7 +212,7 @@ export function createConfigFeature(
     const path = li.textContent;
     if (path) {
       elements.manualInput.value = path;
-      setConfigStatus(
+      setStatus(
         'Path selected from list. Click "Set Path" to save.',
         'info',
       );
@@ -232,22 +242,8 @@ export function createConfigFeature(
     elements.pathsList.appendChild(item);
   }
 
-  /**
-   * Handles the auto-detect button click.
-   */
-  function handleDetectClick(): void {
-    void detectSteamSavePaths();
-  }
-
-  /**
-   * Handles the save path button click.
-   */
-  function handleSavePathClick(): void {
-    void savePath();
-  }
-
-  elements.detectButton.addEventListener('click', handleDetectClick);
-  elements.saveButton.addEventListener('click', handleSavePathClick);
+  elements.detectButton.addEventListener('click', () => detectSteamSavePaths());
+  elements.saveButton.addEventListener('click', () => savePath());
   elements.pathsList.addEventListener('click', handlePathSelectionClick);
 
   return {

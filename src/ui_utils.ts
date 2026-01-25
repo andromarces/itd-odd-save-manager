@@ -1,5 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 
+export interface SafeInvokeOptions {
+  actionName?: string;
+  successLog?: string;
+  successAlert?: string;
+  alertOnError?: boolean;
+  onError?: (error: unknown) => void;
+  logContainer?: HTMLDivElement;
+}
+
 /**
  * Helper to safely query DOM elements. Throws if not found.
  */
@@ -76,14 +85,7 @@ export function logActivity(
 export async function safeInvoke<T>(
   command: string,
   args?: Record<string, unknown>,
-  options: {
-    actionName?: string;
-    successLog?: string;
-    successAlert?: string;
-    alertOnError?: boolean;
-    onError?: (error: unknown) => void;
-    logContainer?: HTMLDivElement;
-  } = {},
+  options: SafeInvokeOptions = {},
 ): Promise<T | undefined> {
   const action = options.actionName || command;
   try {
@@ -115,4 +117,20 @@ export async function safeInvoke<T>(
 
     return undefined;
   }
+}
+
+/**
+ * A wrapper around safeInvoke that focuses on performing an action with standard feedback.
+ * Useful for button clicks and simple actions.
+ */
+export async function invokeAction<T>(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  actionDescription: string,
+  options: Omit<SafeInvokeOptions, 'actionName'> = {}
+): Promise<T | undefined> {
+  return safeInvoke<T>(command, args, {
+    actionName: actionDescription,
+    ...options,
+  });
 }
