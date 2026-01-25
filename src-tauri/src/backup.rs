@@ -13,6 +13,7 @@ use std::time::SystemTime;
 const BACKUP_DIR_NAME: &str = ".backups";
 const HASH_FILE_NAME: &str = ".hash";
 const INDEX_FILE_NAME: &str = "index.json";
+const LOCKED_FILE_NAME: &str = ".locked";
 
 /// Represents metadata for a backup entry.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -31,6 +32,8 @@ pub struct BackupInfo {
     pub modified: String,
     /// The game number (0-based for internal logic).
     pub game_number: u32,
+    /// Whether the backup is locked (preventing auto-deletion).
+    pub locked: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -256,6 +259,8 @@ fn backup_info_from_folder(
         .map_err(|e| e.to_string())?
         .len();
 
+    let locked = path.join(LOCKED_FILE_NAME).exists();
+
     Ok(Some(BackupInfo {
         path: path.to_string_lossy().to_string(),
         filename: folder_name.to_string(),
@@ -267,6 +272,7 @@ fn backup_info_from_folder(
         size,
         modified: info.timestamp.to_rfc3339(),
         game_number: info.game_number,
+        locked,
     }))
 }
 
@@ -364,7 +370,7 @@ fn enforce_backup_limit(save_dir: &Path, game_number: u32, limit: usize) -> Resu
 
     let mut backups = get_backups(save_dir)?
         .into_iter()
-        .filter(|b| b.game_number == game_number)
+        .filter(|b| b.game_number == game_number && !b.locked)
         .collect::<Vec<_>>();
 
     // Backups are sorted by modified desc (newest first).
@@ -485,6 +491,25 @@ pub fn restore_backup(backup_folder_path: &Path, target_save_dir: &Path) -> Resu
     } else {
         Err("No valid save files found in backup folder to restore".to_string())
     }
+}
+
+/// Sets or unsets the lock status for a backup folder.
+pub fn set_backup_lock(backup_folder_path: &Path, locked: bool) -> Result<(), String> {
+    if !backup_folder_path.exists() {
+        return Err("Backup folder does not exist".to_string());
+    }
+
+    let lock_file = backup_folder_path.join(LOCKED_FILE_NAME);
+
+    if locked {
+        if !lock_file.exists() {
+            fs::write(&lock_file, "").map_err(|e| e.to_string())?;
+        }
+    } else if lock_file.exists() {
+        fs::remove_file(&lock_file).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 /// Calculates the SHA-256 hash of a file.
@@ -734,7 +759,145 @@ mod tests {
         };
 
         // backups[0] is newest
+
         check_content(&backups[0], "data 3");
+
         check_content(&backups[1], "data 2");
+    }
+
+    /// Tests that locked backups are excluded from the limit count and not deleted.
+
+    #[test]
+
+    fn test_backup_lock_enforcement() {
+        let dir = tempdir().unwrap();
+
+        let save_dir = dir.path();
+
+        let game_number = 4;
+
+        let main_sav = save_dir.join("gamesave_4.sav");
+
+        let limit = 2;
+
+        // 1. Create first backup
+
+        {
+            let mut f = File::create(&main_sav).unwrap();
+
+            writeln!(f, "data 1").unwrap();
+        }
+
+        let backup1_path = perform_backup_for_game(save_dir, game_number, limit)
+            .unwrap()
+            .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        // 2. Lock the first backup
+
+        set_backup_lock(&backup1_path, true).unwrap();
+
+        // 3. Create second backup
+
+        {
+            let mut f = File::create(&main_sav).unwrap();
+
+            writeln!(f, "data 2").unwrap();
+        }
+
+        let _backup2_path = perform_backup_for_game(save_dir, game_number, limit)
+            .unwrap()
+            .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        // 4. Create third backup
+
+        {
+            let mut f = File::create(&main_sav).unwrap();
+
+            writeln!(f, "data 3").unwrap();
+        }
+
+        let _backup3_path = perform_backup_for_game(save_dir, game_number, limit)
+            .unwrap()
+            .unwrap();
+
+        // Check backups
+
+        let backups = get_backups(save_dir).unwrap();
+
+        // Should have 3 backups total:
+
+        // - data 3 (newest, unlocked)
+
+        // - data 2 (unlocked)
+
+        // - data 1 (oldest, locked)
+
+        // Limit is 2 unlocked. We have 2 unlocked. Locking saved data 1 from being deleted?
+
+        // Wait, if limit is 2 unlocked.
+
+        // Step 1: data 1 (locked) -> 0 unlocked.
+
+        // Step 3: data 2 (unlocked) -> 1 unlocked.
+
+        // Step 4: data 3 (unlocked) -> 2 unlocked.
+
+        // Total backups: 3.
+
+        assert_eq!(backups.len(), 3);
+
+        // Verify content
+
+        let check_content = |backup: &BackupInfo, expected: &str| {
+            let path = PathBuf::from(&backup.path).join("gamesave_4.sav");
+
+            let content = fs::read_to_string(path).unwrap();
+
+            assert_eq!(content.trim(), expected);
+        };
+
+        // Sorted by modified desc: data 3, data 2, data 1
+
+        check_content(&backups[0], "data 3");
+
+        check_content(&backups[1], "data 2");
+
+        check_content(&backups[2], "data 1");
+
+        assert!(backups[2].locked);
+
+        // 5. Create fourth backup -> limit 2 exceeded for unlocked?
+
+        // Current unlocked: data 3, data 2. Count 2.
+
+        // Adding data 4 -> Count 3 unlocked.
+
+        // Should delete oldest unlocked (data 2).
+
+        // Result: data 4, data 3, data 1 (locked).
+
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        {
+            let mut f = File::create(&main_sav).unwrap();
+
+            writeln!(f, "data 4").unwrap();
+        }
+
+        perform_backup_for_game(save_dir, game_number, limit).unwrap();
+
+        let backups_final = get_backups(save_dir).unwrap();
+
+        assert_eq!(backups_final.len(), 3);
+
+        check_content(&backups_final[0], "data 4");
+
+        check_content(&backups_final[1], "data 3");
+
+        check_content(&backups_final[2], "data 1");
     }
 }

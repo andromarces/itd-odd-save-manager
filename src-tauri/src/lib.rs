@@ -97,6 +97,43 @@ async fn restore_backup_command(backup_path: String, target_path: String) -> Res
     run_blocking(move || backup::restore_backup(&backup, &target_dir)).await
 }
 
+/// Verifies that a backup path is valid and within the allowed backup directory.
+fn verify_backup_path(save_path: &Path, backup_path: &Path) -> Result<PathBuf, String> {
+    // Security check: Ensure the path is within the designated backup directory
+    let backup_root = save_path.join(".backups");
+
+    // Canonicalize paths to resolve symlinks and relative components for secure comparison.
+    // Both paths must exist for canonicalize to succeed.
+    let canonical_target = backup_path
+        .canonicalize()
+        .map_err(|_| "Invalid backup path".to_string())?;
+    let canonical_root = backup_root
+        .canonicalize()
+        .map_err(|_| "Backup directory not found".to_string())?;
+
+    if !canonical_target.starts_with(&canonical_root) {
+        return Err("Security violation: Path is outside the backup directory".to_string());
+    }
+
+    Ok(canonical_target)
+}
+
+/// Tauri command to toggle the lock status of a backup.
+#[tauri::command(rename_all = "snake_case")]
+async fn toggle_backup_lock_command(
+    state: tauri::State<'_, ConfigState>,
+    backup_path: String,
+    locked: bool,
+) -> Result<(), String> {
+    let save_path =
+        extract_save_path(&state)?.ok_or_else(|| "Save path not configured".to_string())?;
+    let path = PathBuf::from(&backup_path);
+
+    let verified_path = verify_backup_path(&save_path, &path)?;
+
+    run_blocking(move || backup::set_backup_lock(&verified_path, locked)).await
+}
+
 /// Command to initialize the watcher from the frontend.
 /// This ensures the watcher starts strictly after the UI is shown.
 #[tauri::command(rename_all = "snake_case")]
@@ -279,6 +316,7 @@ pub fn run() {
             config::validate_path,
             get_backups_command,
             restore_backup_command,
+            toggle_backup_lock_command,
             init_watcher,
             game_manager::launch_game
         ])
@@ -445,5 +483,84 @@ mod tests {
         }
 
         assert_eq!(config.save_path, Some("C:\\Custom\\Path".to_string()));
+    }
+
+    /// Verifies the security logic of the verify_backup_path helper.
+    #[test]
+    fn test_verify_backup_path_security() {
+        use std::fs;
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let save_path = temp_dir.path().join("saves");
+        let backup_root = save_path.join(".backups");
+        let game_backup = backup_root.join("Game 1 - 2024-01-01");
+
+        // Canonicalize requires existence
+        fs::create_dir_all(&game_backup).expect("failed to create mock backup dir");
+
+        // 1. Valid path inside .backups
+        assert!(verify_backup_path(&save_path, &game_backup).is_ok());
+
+        // 2. Path outside save directory completely
+        let malicious = temp_dir.path().join("malicious.exe");
+        fs::File::create(&malicious).expect("failed to create mock malicious file");
+        let result = verify_backup_path(&save_path, &malicious);
+        assert!(result.is_err());
+        // Since backup_root/saves directory isn't necessarily fully canonicalizable if some parts don't exist,
+        // but here they do.
+
+        // 3. Path inside save directory but NOT in .backups
+        let other = save_path.join("unauthorized_file.txt");
+        fs::File::create(&other).expect("failed to create mock unauthorized file");
+        let result = verify_backup_path(&save_path, &other);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Security violation"));
+
+        // 4. Traversal attempt using relative components
+        let traversal_path = game_backup
+            .join("..")
+            .join("..")
+            .join("unauthorized_file.txt");
+        // Canonicalization will resolve this to 'save_path/unauthorized_file.txt'
+        let result = verify_backup_path(&save_path, &traversal_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Security violation"));
+
+        // 5. Symlink security checks
+        #[cfg(unix)]
+        use std::os::unix::fs::symlink;
+        #[cfg(windows)]
+        use std::os::windows::fs::symlink_dir;
+
+        // Create an external directory to point to
+        let external_dir = temp_dir.path().join("external_dir");
+        fs::create_dir_all(&external_dir).expect("failed to create external dir");
+
+        let link_to_external = backup_root.join("malicious_link");
+        let link_to_internal = backup_root.join("valid_link");
+
+        #[cfg(windows)]
+        {
+            // Note: Symlink creation on Windows may require Developer Mode or elevation.
+            // If it fails, we gracefully skip this part of the test.
+            if symlink_dir(&external_dir, &link_to_external).is_ok() {
+                let res = verify_backup_path(&save_path, &link_to_external);
+                assert!(res.is_err());
+                assert!(res.unwrap_err().contains("Security violation"));
+            }
+            if symlink_dir(&game_backup, &link_to_internal).is_ok() {
+                assert!(verify_backup_path(&save_path, &link_to_internal).is_ok());
+            }
+        }
+        #[cfg(unix)]
+        {
+            if symlink(&external_dir, &link_to_external).is_ok() {
+                let res = verify_backup_path(&save_path, &link_to_external);
+                assert!(res.is_err());
+                assert!(res.unwrap_err().contains("Security violation"));
+            }
+            if symlink(&game_backup, &link_to_internal).is_ok() {
+                assert!(verify_backup_path(&save_path, &link_to_internal).is_ok());
+            }
+        }
     }
 }

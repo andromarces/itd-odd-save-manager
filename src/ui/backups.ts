@@ -62,17 +62,30 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
       const fileCell = document.createElement('td');
       fileCell.textContent = getBackupDisplayName(backup);
       fileCell.title = backup.filename;
+      if (backup.locked) {
+        fileCell.textContent += ' (Locked)';
+      }
 
       const dateCell = document.createElement('td');
       dateCell.textContent = formatDate(backup.modified);
 
       const actionCell = document.createElement('td');
+      
       const restoreBtn = document.createElement('button');
       restoreBtn.textContent = 'Restore';
       restoreBtn.className = 'small';
       restoreBtn.dataset.index = index.toString();
+      restoreBtn.dataset.action = 'restore';
+
+      const lockBtn = document.createElement('button');
+      lockBtn.textContent = backup.locked ? 'Unlock' : 'Lock';
+      lockBtn.className = 'small secondary'; // Assuming secondary class exists or fallback
+      lockBtn.dataset.index = index.toString();
+      lockBtn.dataset.action = 'lock';
+      lockBtn.style.marginLeft = '8px';
 
       actionCell.appendChild(restoreBtn);
+      actionCell.appendChild(lockBtn);
 
       row.appendChild(fileCell);
       row.appendChild(dateCell);
@@ -115,6 +128,24 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
   }
 
   /**
+   * Toggles the lock status of a backup.
+   */
+  async function toggleBackupLock(backup: BackupInfo): Promise<void> {
+    await safeInvoke(
+      'toggle_backup_lock_command',
+      {
+        backup_path: backup.path,
+        locked: !backup.locked,
+      },
+      {
+        actionName: 'toggle backup lock',
+        onError: () => logActivity(`Failed to toggle lock for ${backup.filename}`),
+      },
+    );
+    await loadBackups();
+  }
+
+  /**
    * Restores a selected backup after user confirmation.
    */
   async function restoreBackup(backup: BackupInfo): Promise<void> {
@@ -138,7 +169,7 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
   }
 
   /**
-   * Handles delegated restore clicks on the backups table.
+   * Handles delegated clicks on the backups table.
    */
   function handleBackupsListClick(event: Event): void {
     const target = event.target as HTMLElement;
@@ -148,7 +179,12 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
     const index = parseInt(button.dataset.index, 10);
     const backup = currentBackups[index];
     if (backup) {
-      void restoreBackup(backup);
+      const action = button.dataset.action;
+      if (action === 'restore') {
+        void restoreBackup(backup);
+      } else if (action === 'lock') {
+        void toggleBackupLock(backup);
+      }
     }
   }
 
