@@ -295,25 +295,22 @@ table {
 }
 
 #backups-table {
-  table-layout: fixed;
-  width: max-content;
+  width: 100%;
 }
 
 #backups-table th:nth-child(1),
 #backups-table td:nth-child(1) {
-  width: 220px;
-  min-width: 220px;
-  max-width: 220px;
+  min-width: 120px;
 }
 
 #backups-table th:nth-child(2),
 #backups-table td:nth-child(2) {
-  width: 220px;
+  min-width: 180px;
 }
 
 #backups-table th:nth-child(3),
 #backups-table td:nth-child(3) {
-  width: 280px;
+  min-width: 280px;
 }
 
 #backups-table tbody tr:not(.note-row) td:first-child {
