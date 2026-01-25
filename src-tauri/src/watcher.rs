@@ -1,6 +1,9 @@
 // ITD ODD Save Manager by andromarces
 
-use crate::backup::perform_backup_for_game;
+use crate::backup::{
+    ensure_backup_root, load_index, perform_backup_for_game, perform_backup_for_game_internal,
+    save_index,
+};
 use crate::filename_utils;
 use log::{error, info};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -129,6 +132,37 @@ impl FileWatcher {
     }
 }
 
+/// Performs an immediate scan of the directory and backs up any existing save files.
+/// Uses a batch approach to load/save the index only once.
+pub(crate) fn scan_and_backup_existing(save_dir: &PathBuf) {
+    info!("Performing initial scan of {:?}", save_dir);
+    if let Ok(entries) = std::fs::read_dir(save_dir) {
+        if let Ok(backup_root) = ensure_backup_root(save_dir) {
+            let mut index = load_index(&backup_root);
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                // We only care about main save files for the trigger,
+                // perform_backup_for_game handles the rest.
+                if let Some(info) = filename_utils::parse_path(&path) {
+                    if !info.is_bak {
+                        if let Err(e) = perform_backup_for_game_internal(
+                            save_dir,
+                            &backup_root,
+                            info.game_number,
+                            &mut index,
+                        ) {
+                            error!("Initial backup failed for game {}: {}", info.game_number, e);
+                        }
+                    }
+                }
+            }
+
+            save_index(&backup_root, &index);
+        }
+    }
+}
+
 /// Runs the debounce loop to process file system events.
 ///
 /// It performs an initial scan for existing save files and then listens for
@@ -148,21 +182,7 @@ fn debounce_loop(
     thread::sleep(Duration::from_secs(3));
 
     // Initial Scan: Check for existing saves that need backup
-    info!("Performing initial scan of {:?}", save_dir);
-    if let Ok(entries) = std::fs::read_dir(&save_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            // We only care about main save files for the trigger,
-            // perform_backup_for_game handles the rest.
-            if let Some(info) = filename_utils::parse_path(&path) {
-                if !info.is_bak {
-                    if let Err(e) = perform_backup_for_game(&save_dir, info.game_number) {
-                        error!("Initial backup failed for game {}: {}", info.game_number, e);
-                    }
-                }
-            }
-        }
-    }
+    scan_and_backup_existing(&save_dir);
 
     let mut pending_games: HashSet<u32> = HashSet::new();
     let mut last_change_time = std::time::Instant::now();
@@ -306,5 +326,35 @@ mod tests {
         // These return None, so they are filtered out implicitly by the `if let Some` check
         assert!(filename_utils::parse_path(&path_invalid).is_none());
         assert!(filename_utils::parse_path(&path_invalid_fmt).is_none());
+    }
+
+    /// Tests that the batched initial scan backs up all existing files.
+    #[test]
+    fn test_initial_scan_batch_processing() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path().to_path_buf();
+
+        // Create two save files
+        let save1 = save_dir.join("gamesave_1.sav");
+        let save2 = save_dir.join("gamesave_2.sav");
+        std::fs::write(&save1, "data1").unwrap();
+        std::fs::write(&save2, "data2").unwrap();
+
+        // Run the scan
+        scan_and_backup_existing(&save_dir);
+
+        // Verify backups created
+        let backups_dir = save_dir.join(".backups");
+        assert!(backups_dir.exists());
+        let index_path = backups_dir.join("index.json");
+        assert!(index_path.exists());
+
+        // Verify that backups were actually registered
+        let backups = crate::backup::get_backups(&save_dir).unwrap();
+        assert_eq!(backups.len(), 2);
+
+        let games: std::collections::HashSet<u32> = backups.iter().map(|b| b.game_number).collect();
+        assert!(games.contains(&1));
+        assert!(games.contains(&2));
     }
 }

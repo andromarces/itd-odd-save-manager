@@ -34,20 +34,20 @@ pub struct BackupInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-struct BackupIndex {
-    games: HashMap<u32, IndexEntry>,
+pub(crate) struct BackupIndex {
+    pub(crate) games: HashMap<u32, IndexEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct IndexEntry {
-    last_hash: String,
-    last_source_size: u64,
-    last_source_modified: u128, // Unix timestamp in nanoseconds
-    last_backup_path: String,   // Relative folder name of the last backup
+pub(crate) struct IndexEntry {
+    pub(crate) last_hash: String,
+    pub(crate) last_source_size: u64,
+    pub(crate) last_source_modified: u128, // Unix timestamp in nanoseconds
+    pub(crate) last_backup_path: String,   // Relative folder name of the last backup
 }
 
 /// Loads the backup index from disk.
-fn load_index(backup_root: &Path) -> BackupIndex {
+pub(crate) fn load_index(backup_root: &Path) -> BackupIndex {
     let index_path = backup_root.join(INDEX_FILE_NAME);
     if index_path.exists() {
         if let Ok(content) = fs::read_to_string(&index_path) {
@@ -60,9 +60,9 @@ fn load_index(backup_root: &Path) -> BackupIndex {
 }
 
 /// Saves the backup index to disk.
-fn save_index(backup_root: &Path, index: &BackupIndex) {
+pub(crate) fn save_index(backup_root: &Path, index: &BackupIndex) {
     let index_path = backup_root.join(INDEX_FILE_NAME);
-    if let Ok(content) = serde_json::to_string_pretty(index) {
+    if let Ok(content) = serde_json::to_string(index) {
         let _ = fs::write(index_path, content);
     }
 }
@@ -113,7 +113,7 @@ fn read_source_metadata(main_path: &Path) -> Result<SourceMetadata, String> {
 }
 
 /// Ensures the backup root directory exists and returns its path.
-fn ensure_backup_root(save_dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn ensure_backup_root(save_dir: &Path) -> Result<PathBuf, String> {
     let backup_root = save_dir.join(BACKUP_DIR_NAME);
     if !backup_root.exists() {
         fs::create_dir_all(&backup_root).map_err(|e| e.to_string())?;
@@ -170,7 +170,7 @@ fn should_skip_duplicate(
                             last_backup_path: entry.last_backup_path.clone(),
                         },
                     );
-                    save_index(backup_root, index);
+                    // Disk write deferred to caller for batch optimization
                 }
 
                 log::info!(
@@ -215,7 +215,6 @@ fn write_hash_file(target_dir: &Path, hash: &str) -> Result<(), String> {
 /// Updates the backup index after a successful backup.
 fn update_index_after_backup(
     index: &mut BackupIndex,
-    backup_root: &Path,
     game_number: u32,
     hash: String,
     source: &SourceMetadata,
@@ -230,7 +229,7 @@ fn update_index_after_backup(
             last_backup_path: folder_name,
         },
     );
-    save_index(backup_root, index);
+    // Disk write deferred to caller for batch optimization
 }
 
 /// Builds a BackupInfo from a backup folder if it matches the naming contract.
@@ -291,6 +290,24 @@ pub fn perform_backup_for_game(
         return Err(format!("Save directory does not exist: {:?}", save_dir));
     }
 
+    let backup_root = ensure_backup_root(save_dir)?;
+    let mut index = load_index(&backup_root);
+
+    let result = perform_backup_for_game_internal(save_dir, &backup_root, game_number, &mut index)?;
+
+    save_index(&backup_root, &index);
+
+    Ok(result)
+}
+
+/// Internal implementation of perform_backup_for_game that accepts a mutable index.
+/// This allows for batching backups without repeated index I/O.
+pub(crate) fn perform_backup_for_game_internal(
+    save_dir: &Path,
+    backup_root: &Path,
+    game_number: u32,
+    index: &mut BackupIndex,
+) -> Result<Option<PathBuf>, String> {
     let paths = build_save_paths(save_dir, game_number);
     if !paths.main_path.exists() {
         // Skip if main save is missing, even if .bak exists (requirement)
@@ -308,39 +325,18 @@ pub fn perform_backup_for_game(
         return Ok(None);
     }
 
-    let backup_root = ensure_backup_root(save_dir)?;
-    let mut index = load_index(&backup_root);
     let source = read_source_metadata(&paths.main_path)?;
-    let (hash, calculated) = resolve_hash(&index, game_number, &source, &paths.main_path)?;
-    if should_skip_duplicate(
-        &mut index,
-        &backup_root,
-        game_number,
-        &hash,
-        calculated,
-        &source,
-    ) {
+    let (hash, calculated) = resolve_hash(index, game_number, &source, &paths.main_path)?;
+    if should_skip_duplicate(index, backup_root, game_number, &hash, calculated, &source) {
         return Ok(None);
     }
 
     let folder_name = filename_utils::format_backup_folder_name(game_number, source.modified_dt);
-    let target_dir = create_target_dir(&backup_root, &folder_name)?;
+    let target_dir = create_target_dir(backup_root, &folder_name)?;
     copy_save_files(&paths, &target_dir)?;
     write_hash_file(&target_dir, &hash)?;
-    update_index_after_backup(
-        &mut index,
-        &backup_root,
-        game_number,
-        hash,
-        &source,
-        folder_name,
-    );
+    update_index_after_backup(index, game_number, hash, &source, folder_name);
 
-    log::info!(
-        "Backup created for game {} at {:?}",
-        game_number,
-        target_dir
-    );
     Ok(Some(target_dir))
 }
 

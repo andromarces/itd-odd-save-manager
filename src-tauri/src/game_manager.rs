@@ -3,7 +3,7 @@
 use crate::config::ConfigState;
 use std::thread;
 use std::time::Duration;
-use sysinfo::{ProcessesToUpdate, System};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_opener::OpenerExt;
 
@@ -17,7 +17,7 @@ const PROCESS_NAME_PART: &str = "intothedead"; // Lowercase match
 ///
 /// This is a heuristic that checks if the process name contains the target string (case-insensitive).
 fn is_game_process(name: &str) -> bool {
-    name.to_lowercase().contains(PROCESS_NAME_PART)
+    name.to_ascii_lowercase().contains(PROCESS_NAME_PART)
 }
 
 /// Initiates game launch via Steam protocol.
@@ -78,7 +78,11 @@ pub fn start_monitor<R: Runtime>(app: AppHandle<R>) {
             };
 
             // Check if game is running
-            sys.refresh_processes(ProcessesToUpdate::All, true);
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing(),
+            );
             let processes = sys.processes();
             let game_running = processes.values().any(|p| {
                 if let Some(name) = p.name().to_str() {

@@ -28,6 +28,8 @@ export function getInvokeErrorMessage(error: unknown): string {
   return String(error);
 }
 
+let cachedLogContainer: HTMLDivElement | null = null;
+
 /**
  * Appends a message to the activity log with a timestamp.
  */
@@ -35,7 +37,15 @@ export function logActivity(
   message: string,
   logContainer?: HTMLDivElement,
 ): void {
-  const container = logContainer || document.querySelector('#activity-log');
+  // Invalidated stale cache if element is removed from DOM
+  if (cachedLogContainer && !document.body.contains(cachedLogContainer)) {
+    cachedLogContainer = null;
+  }
+
+  const container =
+    logContainer ||
+    cachedLogContainer ||
+    (cachedLogContainer = document.querySelector<HTMLDivElement>('#activity-log'));
   if (!container) return;
 
   const entry = document.createElement('div');
