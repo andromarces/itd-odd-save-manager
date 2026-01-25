@@ -13,9 +13,16 @@ const GAME_APP_ID: &str = "2239710";
 // or differs significantly, detection will fail.
 const PROCESS_NAME_PART: &str = "intothedead"; // Lowercase match
 
+/// Checks if the process name matches the game we are looking for.
+///
+/// This is a heuristic that checks if the process name contains the target string (case-insensitive).
+fn is_game_process(name: &str) -> bool {
+    name.to_lowercase().contains(PROCESS_NAME_PART)
+}
+
 /// Initiates game launch via Steam protocol.
 #[tauri::command(rename_all = "snake_case")]
-pub fn launch_game<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+pub async fn launch_game<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     log::info!("Launching game via Steam...");
     match app
         .opener()
@@ -29,6 +36,24 @@ pub fn launch_game<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
             log::error!("Failed to launch game: {}", e);
             Err(format!("Failed to launch game: {}", e))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_game_process;
+
+    /// Tests that process matching is case-insensitive.
+    #[test]
+    fn test_is_game_process_case_insensitive() {
+        assert!(is_game_process("IntoTheDead.exe"));
+        assert!(is_game_process("intothedead"));
+    }
+
+    /// Tests that unrelated processes are rejected.
+    #[test]
+    fn test_is_game_process_rejects_unrelated() {
+        assert!(!is_game_process("notepad.exe"));
     }
 }
 
@@ -57,7 +82,7 @@ pub fn start_monitor<R: Runtime>(app: AppHandle<R>) {
             let processes = sys.processes();
             let game_running = processes.values().any(|p| {
                 if let Some(name) = p.name().to_str() {
-                    name.to_lowercase().contains(PROCESS_NAME_PART)
+                    is_game_process(name)
                 } else {
                     false
                 }

@@ -1,7 +1,7 @@
 // ITD ODD Save Manager by andromarces
 
 use crate::filename_utils;
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -67,6 +67,210 @@ fn save_index(backup_root: &Path, index: &BackupIndex) {
     }
 }
 
+/// Conventional save file paths for a specific game slot.
+#[derive(Debug, Clone)]
+struct SavePaths {
+    main_filename: String,
+    main_path: PathBuf,
+    bak_filename: String,
+    bak_path: PathBuf,
+}
+
+/// Builds the conventional save file paths for a game slot.
+fn build_save_paths(save_dir: &Path, game_number: u32) -> SavePaths {
+    let main_filename = format!("gamesave_{}.sav", game_number);
+    let bak_filename = format!("gamesave_{}.sav.bak", game_number);
+    SavePaths {
+        main_path: save_dir.join(&main_filename),
+        bak_path: save_dir.join(&bak_filename),
+        main_filename,
+        bak_filename,
+    }
+}
+
+/// Metadata needed for backup naming and deduplication.
+#[derive(Debug, Clone)]
+struct SourceMetadata {
+    size: u64,
+    modified_nanos: u128,
+    modified_dt: DateTime<Local>,
+}
+
+/// Reads metadata needed for deduplication and folder naming.
+fn read_source_metadata(main_path: &Path) -> Result<SourceMetadata, String> {
+    let metadata = fs::metadata(main_path).map_err(|e| e.to_string())?;
+    let modified_time = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+    let modified_nanos = modified_time
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    Ok(SourceMetadata {
+        size: metadata.len(),
+        modified_nanos,
+        modified_dt: modified_time.into(),
+    })
+}
+
+/// Ensures the backup root directory exists and returns its path.
+fn ensure_backup_root(save_dir: &Path) -> Result<PathBuf, String> {
+    let backup_root = save_dir.join(BACKUP_DIR_NAME);
+    if !backup_root.exists() {
+        fs::create_dir_all(&backup_root).map_err(|e| e.to_string())?;
+    }
+    Ok(backup_root)
+}
+
+/// Resolves the content hash, short circuiting when index metadata matches.
+fn resolve_hash(
+    index: &BackupIndex,
+    game_number: u32,
+    source: &SourceMetadata,
+    main_path: &Path,
+) -> Result<(String, bool), String> {
+    if let Some(entry) = index.games.get(&game_number) {
+        if entry.last_source_size == source.size
+            && entry.last_source_modified == source.modified_nanos
+        {
+            log::debug!(
+                "Metadata match for game {}: skipping hash calculation.",
+                game_number
+            );
+            return Ok((entry.last_hash.clone(), false));
+        }
+    }
+
+    let hash = calculate_hash(main_path)?;
+    Ok((hash, true))
+}
+
+/// Checks for duplicate backups and refreshes stale index metadata when safe.
+fn should_skip_duplicate(
+    index: &mut BackupIndex,
+    backup_root: &Path,
+    game_number: u32,
+    hash: &str,
+    calculated: bool,
+    source: &SourceMetadata,
+) -> bool {
+    if let Some(entry) = index.games.get(&game_number).cloned() {
+        if entry.last_hash == hash {
+            let last_backup_full_path = backup_root.join(&entry.last_backup_path);
+            if last_backup_full_path.exists() {
+                if calculated
+                    && (entry.last_source_size != source.size
+                        || entry.last_source_modified != source.modified_nanos)
+                {
+                    index.games.insert(
+                        game_number,
+                        IndexEntry {
+                            last_hash: hash.to_string(),
+                            last_source_size: source.size,
+                            last_source_modified: source.modified_nanos,
+                            last_backup_path: entry.last_backup_path.clone(),
+                        },
+                    );
+                    save_index(backup_root, index);
+                }
+
+                log::info!(
+                    "Duplicate backup found for game {} (index match), skipping.",
+                    game_number
+                );
+                return true;
+            }
+
+            log::warn!(
+                "Index pointed to missing backup {:?}, forcing new backup.",
+                last_backup_full_path
+            );
+        }
+    }
+
+    false
+}
+
+/// Creates the target backup directory and returns its path.
+fn create_target_dir(backup_root: &Path, folder_name: &str) -> Result<PathBuf, String> {
+    let target_dir = backup_root.join(folder_name);
+    fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+    Ok(target_dir)
+}
+
+/// Copies the relevant save files into the target directory.
+fn copy_save_files(paths: &SavePaths, target_dir: &Path) -> Result<(), String> {
+    fs::copy(&paths.main_path, target_dir.join(&paths.main_filename)).map_err(|e| e.to_string())?;
+    if paths.bak_path.exists() {
+        fs::copy(&paths.bak_path, target_dir.join(&paths.bak_filename))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Writes the hash marker file into the target directory.
+fn write_hash_file(target_dir: &Path, hash: &str) -> Result<(), String> {
+    fs::write(target_dir.join(HASH_FILE_NAME), hash).map_err(|e| e.to_string())
+}
+
+/// Updates the backup index after a successful backup.
+fn update_index_after_backup(
+    index: &mut BackupIndex,
+    backup_root: &Path,
+    game_number: u32,
+    hash: String,
+    source: &SourceMetadata,
+    folder_name: String,
+) {
+    index.games.insert(
+        game_number,
+        IndexEntry {
+            last_hash: hash,
+            last_source_size: source.size,
+            last_source_modified: source.modified_nanos,
+            last_backup_path: folder_name,
+        },
+    );
+    save_index(backup_root, index);
+}
+
+/// Builds a BackupInfo from a backup folder if it matches the naming contract.
+fn backup_info_from_folder(
+    path: &Path,
+    folder_name: &str,
+    save_dir: &Path,
+) -> Result<Option<BackupInfo>, String> {
+    let Some(info) = filename_utils::parse_backup_folder_name(folder_name) else {
+        return Ok(None);
+    };
+
+    let main_filename = format!("gamesave_{}.sav", info.game_number);
+    let main_file_path = path.join(&main_filename);
+    if !main_file_path.exists() {
+        log::warn!(
+            "Skipping backup folder {:?} because main save is missing.",
+            path
+        );
+        return Ok(None);
+    }
+
+    let size = fs::metadata(&main_file_path)
+        .map_err(|e| e.to_string())?
+        .len();
+
+    Ok(Some(BackupInfo {
+        path: path.to_string_lossy().to_string(),
+        filename: folder_name.to_string(),
+        original_filename: main_filename.clone(),
+        original_path: save_dir
+            .join(format!("gamesave_{}.sav", info.game_number))
+            .to_string_lossy()
+            .to_string(),
+        size,
+        modified: info.timestamp.to_rfc3339(),
+        game_number: info.game_number,
+    }))
+}
+
 /// Backs up a specific game slot by directory and game number.
 ///
 /// Creates a backup folder named "Game {N+1} - {Timestamp}" to be user-friendly.
@@ -87,14 +291,10 @@ pub fn perform_backup_for_game(
         return Err(format!("Save directory does not exist: {:?}", save_dir));
     }
 
-    let main_filename = format!("gamesave_{}.sav", game_number);
-    let main_path = save_dir.join(&main_filename);
-    let bak_filename = format!("gamesave_{}.sav.bak", game_number);
-    let bak_path = save_dir.join(&bak_filename);
-
-    if !main_path.exists() {
+    let paths = build_save_paths(save_dir, game_number);
+    if !paths.main_path.exists() {
         // Skip if main save is missing, even if .bak exists (requirement)
-        if bak_path.exists() {
+        if paths.bak_path.exists() {
             log::info!(
                 "Only .bak exists for game {}, skipping backup.",
                 game_number
@@ -108,114 +308,33 @@ pub fn perform_backup_for_game(
         return Ok(None);
     }
 
-    let backup_root = save_dir.join(BACKUP_DIR_NAME);
-    if !backup_root.exists() {
-        fs::create_dir_all(&backup_root).map_err(|e| e.to_string())?;
-    }
-
+    let backup_root = ensure_backup_root(save_dir)?;
     let mut index = load_index(&backup_root);
-
-    // Get metadata of main save
-    let metadata = fs::metadata(&main_path).map_err(|e| e.to_string())?;
-    let size = metadata.len();
-    let mtime = metadata
-        .modified()
-        .unwrap_or(SystemTime::UNIX_EPOCH)
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-
-    let mut hash = String::new();
-    let mut calculated = false;
-
-    // Check index for short-circuiting
-    if let Some(entry) = index.games.get(&game_number) {
-        if entry.last_source_size == size && entry.last_source_modified == mtime {
-            // Metadata matches, assume hash is same
-            hash = entry.last_hash.clone();
-            log::debug!(
-                "Metadata match for game {}: skipping hash calculation.",
-                game_number
-            );
-        }
-    }
-
-    if hash.is_empty() {
-        hash = calculate_hash(&main_path)?;
-        calculated = true;
-    }
-
-    // Check for duplicates using index
-    if let Some(entry) = index.games.get(&game_number) {
-        if entry.last_hash == hash {
-            // Check if the referenced backup folder actually exists
-            let last_backup_full_path = backup_root.join(&entry.last_backup_path);
-            if last_backup_full_path.exists() {
-                // If we calculated it, update metadata in index if it was stale
-                if calculated
-                    && (entry.last_source_size != size || entry.last_source_modified != mtime)
-                {
-                    index.games.insert(
-                        game_number,
-                        IndexEntry {
-                            last_hash: hash,
-                            last_source_size: size,
-                            last_source_modified: mtime,
-                            last_backup_path: entry.last_backup_path.clone(),
-                        },
-                    );
-                    save_index(&backup_root, &index);
-                }
-
-                log::info!(
-                    "Duplicate backup found for game {} (index match), skipping.",
-                    game_number
-                );
-                return Ok(None);
-            } else {
-                log::warn!(
-                    "Index pointed to missing backup {:?}, forcing new backup.",
-                    last_backup_full_path
-                );
-                // Proceed to create new backup
-            }
-        }
-    }
-
-    // Proceed with backup
-    let display_number = game_number + 1;
-    let folder_prefix = format!("Game {} -", display_number);
-
-    let modified_dt: DateTime<Local> = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
-    // Format: Game N - dd-MMM-yyyy hh-mm-ss AM
-    let timestamp_str = modified_dt.format("%d-%b-%Y %I-%M-%S %p").to_string();
-    let folder_name = format!("{} {}", folder_prefix.trim(), timestamp_str);
-
-    let target_dir = backup_root.join(&folder_name);
-    // If target dir already exists (e.g. fast updates within same second), we might overwrite or fail.
-    // fs::create_dir_all succeeds if exists.
-    fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
-
-    // Copy files
-    fs::copy(&main_path, target_dir.join(&main_filename)).map_err(|e| e.to_string())?;
-    if bak_path.exists() {
-        fs::copy(&bak_path, target_dir.join(&bak_filename)).map_err(|e| e.to_string())?;
-    }
-
-    // Write hash
-    fs::write(target_dir.join(HASH_FILE_NAME), &hash).map_err(|e| e.to_string())?;
-
-    // Update Index
-    index.games.insert(
+    let source = read_source_metadata(&paths.main_path)?;
+    let (hash, calculated) = resolve_hash(&index, game_number, &source, &paths.main_path)?;
+    if should_skip_duplicate(
+        &mut index,
+        &backup_root,
         game_number,
-        IndexEntry {
-            last_hash: hash,
-            last_source_size: size,
-            last_source_modified: mtime,
-            last_backup_path: folder_name,
-        },
+        &hash,
+        calculated,
+        &source,
+    ) {
+        return Ok(None);
+    }
+
+    let folder_name = filename_utils::format_backup_folder_name(game_number, source.modified_dt);
+    let target_dir = create_target_dir(&backup_root, &folder_name)?;
+    copy_save_files(&paths, &target_dir)?;
+    write_hash_file(&target_dir, &hash)?;
+    update_index_after_backup(
+        &mut index,
+        &backup_root,
+        game_number,
+        hash,
+        &source,
+        folder_name,
     );
-    save_index(&backup_root, &index);
 
     log::info!(
         "Backup created for game {} at {:?}",
@@ -250,78 +369,8 @@ pub fn get_backups(save_dir: &Path) -> Result<Vec<BackupInfo>, String> {
 
         if path.is_dir() {
             let folder_name = entry.file_name().to_string_lossy().to_string();
-
-            // Expected Format: "Game {N} - {Timestamp}"
-            // where Timestamp is "dd-MMM-yyyy hh-mm-ss AM"
-            if let Some((prefix, date_part)) = folder_name.split_once(" - ") {
-                // Parse "Game {N}"
-                if let Some(stripped_prefix) = prefix.strip_prefix("Game ") {
-                    if let Ok(display_number) = stripped_prefix.parse::<u32>() {
-                        // Internal game number is 0-based
-                        let game_number = display_number.saturating_sub(1);
-
-                        // Parse timestamp using NaiveDateTime and Local timezone to avoid deprecation
-                        let modified_str = if let Ok(naive_dt) =
-                            NaiveDateTime::parse_from_str(date_part, "%d-%b-%Y %I-%M-%S %p")
-                        {
-                            match Local.from_local_datetime(&naive_dt) {
-                                chrono::LocalResult::Single(dt) => dt.to_rfc3339(),
-                                chrono::LocalResult::Ambiguous(dt1, _) => dt1.to_rfc3339(),
-                                chrono::LocalResult::None => {
-                                    // Fallback if conversion fails
-                                    let main_file_path =
-                                        path.join(format!("gamesave_{}.sav", game_number));
-                                    if let Ok(meta) = fs::metadata(&main_file_path) {
-                                        let m: DateTime<Local> = meta
-                                            .modified()
-                                            .unwrap_or(SystemTime::UNIX_EPOCH)
-                                            .into();
-                                        m.to_rfc3339()
-                                    } else {
-                                        let dt: DateTime<Local> = SystemTime::UNIX_EPOCH.into();
-                                        dt.to_rfc3339()
-                                    }
-                                }
-                            }
-                        } else {
-                            // Fallback to file metadata if parsing fails
-                            let main_file_path = path.join(format!("gamesave_{}.sav", game_number));
-                            if let Ok(meta) = fs::metadata(&main_file_path) {
-                                let m: DateTime<Local> =
-                                    meta.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
-                                m.to_rfc3339()
-                            } else {
-                                // Default to epoch if all else fails
-                                let dt: DateTime<Local> = SystemTime::UNIX_EPOCH.into();
-                                dt.to_rfc3339()
-                            }
-                        };
-
-                        // We still need file size from the actual file
-                        let main_filename = format!("gamesave_{}.sav", game_number);
-                        let main_file_path = path.join(&main_filename);
-                        let size = if main_file_path.exists() {
-                            fs::metadata(&main_file_path).map(|m| m.len()).unwrap_or(0)
-                        } else {
-                            0
-                        };
-
-                        if main_file_path.exists() {
-                            backups.push(BackupInfo {
-                                path: path.to_string_lossy().to_string(),
-                                filename: folder_name,
-                                original_filename: main_filename,
-                                original_path: save_dir
-                                    .join(format!("gamesave_{}.sav", game_number))
-                                    .to_string_lossy()
-                                    .to_string(),
-                                size,
-                                modified: modified_str,
-                                game_number,
-                            });
-                        }
-                    }
-                }
+            if let Some(info) = backup_info_from_folder(&path, &folder_name, save_dir)? {
+                backups.push(info);
             }
         }
     }
@@ -391,6 +440,33 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+
+    /// Tests that save paths are constructed consistently for a game slot.
+    #[test]
+    fn test_build_save_paths() {
+        let dir = tempdir().unwrap();
+        let paths = build_save_paths(dir.path(), 2);
+
+        assert_eq!(paths.main_filename, "gamesave_2.sav");
+        assert_eq!(paths.bak_filename, "gamesave_2.sav.bak");
+        assert_eq!(paths.main_path, dir.path().join("gamesave_2.sav"));
+        assert_eq!(paths.bak_path, dir.path().join("gamesave_2.sav.bak"));
+    }
+
+    /// Tests that invalid backup folder names are ignored during listing.
+    #[test]
+    fn test_backup_info_from_folder_ignores_invalid_name() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let backup_root = save_dir.join(BACKUP_DIR_NAME);
+        fs::create_dir_all(&backup_root).unwrap();
+
+        let invalid_folder = backup_root.join("not-a-backup");
+        fs::create_dir_all(&invalid_folder).unwrap();
+
+        let result = backup_info_from_folder(&invalid_folder, "not-a-backup", save_dir).unwrap();
+        assert!(result.is_none());
+    }
 
     /// Tests the complete backup flow including folder creation, deduplication, and file copying.
     #[test]

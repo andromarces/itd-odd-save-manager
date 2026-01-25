@@ -6,6 +6,7 @@ use log::{error, info};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -18,6 +19,7 @@ const DEBOUNCE_DURATION: Duration = Duration::from_secs(2);
 #[derive(Clone)]
 pub struct FileWatcher {
     watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
+    shutdown: Arc<Mutex<Arc<AtomicBool>>>,
 }
 
 impl FileWatcher {
@@ -25,6 +27,7 @@ impl FileWatcher {
     pub fn new() -> Self {
         Self {
             watcher: Arc::new(Mutex::new(None)),
+            shutdown: Arc::new(Mutex::new(Arc::new(AtomicBool::new(false)))),
         }
     }
 
@@ -47,14 +50,9 @@ impl FileWatcher {
         })
         .map_err(|e| e.to_string())?;
 
-        let is_file_input = path.is_file();
-
-        // We always watch the directory
-        let watch_target = if is_file_input {
-            path.parent().ok_or("Invalid file path")?.to_path_buf()
-        } else {
-            path.clone()
-        };
+        // Normalize path (always watch directory)
+        let watch_target = crate::filename_utils::normalize_to_directory(&path)
+            .map_err(|e| format!("Invalid watch target: {}", e))?;
 
         if !watch_target.exists() {
             return Err(format!("Watch target does not exist: {:?}", watch_target));
@@ -66,11 +64,26 @@ impl FileWatcher {
         }
 
         // Store watcher
-        *self.watcher.lock().unwrap() = Some(watcher);
+        // Safe lock: if poisoned, we can't really recover the state, but we return error
+        let mut watcher_guard = self
+            .watcher
+            .lock()
+            .map_err(|_| "Failed to lock watcher state".to_string())?;
+        *watcher_guard = Some(watcher);
+
+        // Create a fresh shutdown token for this thread to avoid clearing prior signals
+        let shutdown_token = Arc::new(AtomicBool::new(false));
+        {
+            let mut shutdown_guard = self
+                .shutdown
+                .lock()
+                .map_err(|_| "Failed to lock shutdown state".to_string())?;
+            *shutdown_guard = shutdown_token.clone();
+        }
 
         // Spawn debouncing thread
         thread::spawn(move || {
-            debounce_loop(rx, watch_target);
+            debounce_loop(rx, watch_target, shutdown_token);
         });
 
         info!("Started watching: {:?}", path);
@@ -79,10 +92,39 @@ impl FileWatcher {
 
     /// Stops the current watcher, if active.
     pub fn stop(&self) {
-        let mut watcher_guard = self.watcher.lock().unwrap();
-        if watcher_guard.is_some() {
-            *watcher_guard = None;
-            info!("Stopped watching");
+        // Signal shutdown to the debouncing thread
+        match self.shutdown.lock() {
+            Ok(shutdown_guard) => {
+                shutdown_guard.store(true, Ordering::SeqCst);
+            }
+            Err(e) => error!("Failed to lock shutdown state during stop: {}", e),
+        }
+
+        match self.watcher.lock() {
+            Ok(mut watcher_guard) => {
+                if watcher_guard.is_some() {
+                    *watcher_guard = None;
+                    info!("Stopped watching");
+                }
+            }
+            Err(e) => error!("Failed to lock watcher state during stop: {}", e),
+        }
+    }
+
+    /// Returns the current shutdown token for test assertions.
+    ///
+    /// If the mutex is poisoned, the inner value is recovered to avoid panics in tests.
+    #[cfg(test)]
+    fn debug_shutdown_token(&self) -> Arc<AtomicBool> {
+        match self.shutdown.lock() {
+            Ok(shutdown_guard) => shutdown_guard.clone(),
+            Err(poisoned) => {
+                error!(
+                    "Shutdown state lock poisoned during debug access: {}",
+                    poisoned
+                );
+                poisoned.into_inner().clone()
+            }
         }
     }
 }
@@ -96,7 +138,12 @@ impl FileWatcher {
 ///
 /// * `rx` - Receiver for file system events.
 /// * `save_dir` - The directory being watched.
-fn debounce_loop(rx: Receiver<notify::Result<notify::Event>>, save_dir: PathBuf) {
+/// * `shutdown` - Atomic boolean to signal shutdown.
+fn debounce_loop(
+    rx: Receiver<notify::Result<notify::Event>>,
+    save_dir: PathBuf,
+    shutdown: Arc<AtomicBool>,
+) {
     // Defer initial scan to improve startup responsiveness
     thread::sleep(Duration::from_secs(3));
 
@@ -122,6 +169,10 @@ fn debounce_loop(rx: Receiver<notify::Result<notify::Event>>, save_dir: PathBuf)
     let mut pending_change = false;
 
     loop {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+
         // Calculate timeout
         let timeout = if pending_change {
             let elapsed = last_change_time.elapsed();
@@ -145,7 +196,7 @@ fn debounce_loop(rx: Receiver<notify::Result<notify::Event>>, save_dir: PathBuf)
                 DEBOUNCE_DURATION - elapsed
             }
         } else {
-            Duration::from_secs(3600) // Long wait
+            Duration::from_secs(60) // Idle wait with periodic shutdown check
         };
 
         match rx.recv_timeout(timeout) {
@@ -180,6 +231,7 @@ fn debounce_loop(rx: Receiver<notify::Result<notify::Event>>, save_dir: PathBuf)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
     use tempfile::tempdir;
 
     /// Tests that the watcher starts and stops without error.
@@ -190,6 +242,47 @@ mod tests {
         // Just verify it doesn't panic on start/stop
         assert!(watcher.start(dir.path().to_path_buf()).is_ok());
         watcher.stop();
+    }
+
+    /// Tests that a stop signal is not cleared by a subsequent start.
+    #[test]
+    fn test_shutdown_signal_not_cleared_by_restart() {
+        let watcher = FileWatcher::new();
+        let dir = tempdir().unwrap();
+
+        assert!(watcher.start(dir.path().to_path_buf()).is_ok());
+        let shutdown_token = watcher.debug_shutdown_token();
+
+        watcher.stop();
+        assert!(
+            shutdown_token.load(Ordering::SeqCst),
+            "Shutdown token should be true after stop"
+        );
+
+        assert!(watcher.start(dir.path().to_path_buf()).is_ok());
+        assert!(
+            shutdown_token.load(Ordering::SeqCst),
+            "Shutdown token from the previous thread should remain true after restart"
+        );
+    }
+
+    /// Tests that debug access does not panic if the shutdown mutex is poisoned.
+    #[test]
+    fn test_debug_shutdown_token_handles_poisoned_lock() {
+        let watcher = FileWatcher::new();
+        let shutdown_arc = watcher.shutdown.clone();
+
+        let poison_result = std::panic::catch_unwind(move || {
+            let _guard = shutdown_arc.lock().unwrap();
+            panic!("poison shutdown mutex");
+        });
+        assert!(poison_result.is_err(), "Expected a poisoned shutdown mutex");
+
+        let debug_result = std::panic::catch_unwind(|| watcher.debug_shutdown_token());
+        assert!(
+            debug_result.is_ok(),
+            "debug_shutdown_token should not panic on poisoned mutex"
+        );
     }
 
     /// Tests the path parsing logic that underpins the debounce loop's filtering.

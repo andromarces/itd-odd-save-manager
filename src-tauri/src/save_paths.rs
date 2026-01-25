@@ -28,7 +28,7 @@ fn detect_windows_local_save_path() -> Option<PathBuf> {
 
 /// Detects the save directory for the game and returns it as a string.
 #[tauri::command(rename_all = "snake_case")]
-pub(crate) fn detect_steam_save_paths() -> Vec<String> {
+pub(crate) async fn detect_steam_save_paths() -> Vec<String> {
     log::info!("Save path detection started");
 
     if !cfg!(target_os = "windows") {

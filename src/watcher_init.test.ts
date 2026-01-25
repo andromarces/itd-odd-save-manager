@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { getInvokeErrorMessage } from './ui_utils';
 import {
-  getInvokeErrorMessage,
   INIT_WATCHER_DEFERRED_MESSAGE,
   isInitWatcherDeferredError,
 } from './watcher_init';
@@ -20,6 +20,11 @@ describe('getInvokeErrorMessage', () => {
   it('returns strings as-is', () => {
     const message = getInvokeErrorMessage('simple error');
     expect(message).toBe('simple error');
+  });
+
+  it('is not exported from watcher_init', async () => {
+    const watcherInitModule = await import('./watcher_init');
+    expect('getInvokeErrorMessage' in watcherInitModule).toBe(false);
   });
 });
 

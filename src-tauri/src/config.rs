@@ -94,7 +94,7 @@ fn is_valid_path(path: &str) -> bool {
 ///
 /// * `Result<AppConfig, String>` - The current configuration or an error message.
 #[tauri::command(rename_all = "snake_case")]
-pub fn get_config(state: State<ConfigState>) -> Result<AppConfig, String> {
+pub async fn get_config(state: State<'_, ConfigState>) -> Result<AppConfig, String> {
     log::info!("Retrieving configuration");
     state.0.lock().map(|config| config.clone()).map_err(|e| {
         log::error!("Failed to access configuration state: {}", e);
@@ -103,10 +103,10 @@ pub fn get_config(state: State<ConfigState>) -> Result<AppConfig, String> {
 }
 
 /// Helper to safely update configuration: locks, clones, mutates, saves to disk, then updates memory.
-fn update_config<F>(config_state: &State<ConfigState>, mutator: F) -> Result<(), String>
-where
-    F: FnOnce(&mut AppConfig),
-{
+fn update_config(
+    config_state: &State<'_, ConfigState>,
+    mutator: impl FnOnce(&mut AppConfig),
+) -> Result<(), String> {
     let mut config_guard = config_state.0.lock().map_err(|e| {
         log::error!("Failed to acquire lock on configuration state: {}", e);
         "Failed to acquire lock on configuration state".to_string()
@@ -134,9 +134,9 @@ where
 ///
 /// * `Result<String, String>` - The normalized path string on success, or an error message.
 #[tauri::command(rename_all = "snake_case")]
-pub fn set_save_path(
-    config_state: State<ConfigState>,
-    watcher: State<FileWatcher>,
+pub async fn set_save_path(
+    config_state: State<'_, ConfigState>,
+    watcher: State<'_, FileWatcher>,
     path: String,
 ) -> Result<String, String> {
     log::info!("Attempting to set save path to: {}", path);
@@ -152,24 +152,9 @@ pub fn set_save_path(
 
     let path_buf = PathBuf::from(&path);
 
-    // Normalize to directory:
-    // If it is a file (exists and is file), use parent.
-    // If it does not exist but looks like a file (has extension), use parent.
-    // Otherwise assume directory.
-    let final_path = if path_buf.is_file() {
-        path_buf
-            .parent()
-            .map(|p| p.to_path_buf())
-            .ok_or("Invalid file path")?
-    } else if !path_buf.exists() && path_buf.extension().is_some() {
-        // Path doesn't exist, but has extension, treat as file path and use parent
-        path_buf
-            .parent()
-            .map(|p| p.to_path_buf())
-            .ok_or("Invalid file path")?
-    } else {
-        path_buf
-    };
+    // Normalize to directory using shared helper
+    let final_path = crate::filename_utils::normalize_to_directory(&path_buf)
+        .map_err(|e| format!("Invalid path: {}", e))?;
 
     let final_path_str = final_path.to_string_lossy().to_string();
     log::info!("Normalized save path to: {}", final_path_str);
@@ -204,8 +189,8 @@ pub fn set_save_path(
 /// * `auto_launch_game` - Enable/disable auto-launch.
 /// * `auto_close` - Enable/disable auto-close.
 #[tauri::command(rename_all = "snake_case")]
-pub fn set_game_settings(
-    config_state: State<ConfigState>,
+pub async fn set_game_settings(
+    config_state: State<'_, ConfigState>,
     auto_launch_game: bool,
     auto_close: bool,
 ) -> Result<(), String> {
@@ -242,7 +227,7 @@ fn save_config(config: &AppConfig) -> Result<(), String> {
 ///
 /// Returns true if the path exists OR if the parent directory exists and looks like a file path.
 #[tauri::command(rename_all = "snake_case")]
-pub fn validate_path(path: String) -> bool {
+pub async fn validate_path(path: String) -> bool {
     let is_valid = is_valid_path(&path);
     log::info!("Validating path '{}': {}", path, is_valid);
     is_valid

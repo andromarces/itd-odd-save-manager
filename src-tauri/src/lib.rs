@@ -12,7 +12,7 @@ use config::ConfigState;
 use std::path::PathBuf;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::Manager;
+use tauri::{async_runtime, Manager};
 #[cfg(target_os = "linux")]
 use tauri_plugin_notification::NotificationExt;
 use watcher::FileWatcher;
@@ -20,16 +20,35 @@ use watcher::FileWatcher;
 // Store tray icon to prevent it from being dropped
 struct TrayState(#[allow(dead_code)] tauri::tray::TrayIcon);
 
-/// Tauri command to list available backups for the configured save path.
-#[tauri::command(rename_all = "snake_case")]
-fn get_backups_command(state: tauri::State<ConfigState>) -> Result<Vec<BackupInfo>, String> {
-    let config = state
+/// Extracts the configured save path without holding the mutex across blocking work.
+fn extract_save_path(state: &tauri::State<'_, ConfigState>) -> Result<Option<PathBuf>, String> {
+    let save_path = state
         .0
         .lock()
-        .map_err(|e| format!("Failed to lock config: {}", e))?;
-    if let Some(path_str) = &config.save_path {
-        let path = PathBuf::from(path_str);
-        backup::get_backups(&path)
+        .map_err(|e| format!("Failed to lock config: {}", e))?
+        .save_path
+        .clone();
+    Ok(save_path.map(PathBuf::from))
+}
+
+/// Runs blocking work on the blocking thread pool and surfaces join errors.
+async fn run_blocking<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|e| format!("Blocking task join error: {}", e))?
+}
+
+/// Tauri command to list available backups for the configured save path.
+#[tauri::command(rename_all = "snake_case")]
+async fn get_backups_command(
+    state: tauri::State<'_, ConfigState>,
+) -> Result<Vec<BackupInfo>, String> {
+    if let Some(path) = extract_save_path(&state)? {
+        run_blocking(move || backup::get_backups(&path)).await
     } else {
         Ok(Vec::new())
     }
@@ -37,25 +56,25 @@ fn get_backups_command(state: tauri::State<ConfigState>) -> Result<Vec<BackupInf
 
 /// Tauri command to restore a specific backup to a target location.
 #[tauri::command(rename_all = "snake_case")]
-fn restore_backup_command(backup_path: String, target_path: String) -> Result<(), String> {
+async fn restore_backup_command(backup_path: String, target_path: String) -> Result<(), String> {
     let backup = PathBuf::from(backup_path);
     let target = PathBuf::from(target_path);
 
     // The backup::restore_backup function expects a target DIRECTORY.
     // If target_path points to a file (e.g. gamesave_0.sav), we use its parent.
-    let target_dir = if target.extension().is_some() {
-        target.parent().ok_or("Invalid target path")?.to_path_buf()
-    } else {
-        target
-    };
+    let target_dir = crate::filename_utils::normalize_to_directory(&target)
+        .map_err(|_| "Invalid target path".to_string())?;
 
-    backup::restore_backup(&backup, &target_dir)
+    run_blocking(move || backup::restore_backup(&backup, &target_dir)).await
 }
 
 /// Command to initialize the watcher from the frontend.
 /// This ensures the watcher starts strictly after the UI is shown.
 #[tauri::command(rename_all = "snake_case")]
-fn init_watcher(app: tauri::AppHandle, state: tauri::State<ConfigState>) -> Result<(), String> {
+async fn init_watcher(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, ConfigState>,
+) -> Result<(), String> {
     // Hard guarantee: Ensure the window is actually visible before starting
     if let Some(window) = app.get_webview_window("main") {
         if !window.is_visible().unwrap_or(false) {
@@ -167,7 +186,10 @@ pub fn run() {
                                 show_main_window(app, false);
                             }
                             "launch" => {
-                                let _ = game_manager::launch_game(app.clone());
+                                let app_handle = app.clone();
+                                async_runtime::spawn(async move {
+                                    let _ = game_manager::launch_game(app_handle).await;
+                                });
                             }
                             _ => {}
                         }
@@ -192,7 +214,7 @@ pub fn run() {
                 std::thread::spawn(move || {
                     // Give app a moment to settle
                     std::thread::sleep(std::time::Duration::from_secs(1));
-                    let _ = game_manager::launch_game(handle);
+                    let _ = async_runtime::block_on(game_manager::launch_game(handle));
                 });
             }
 
@@ -225,6 +247,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent, TrayIconId};
 
     /// Builds a tray click event with the provided mouse button.
@@ -274,5 +297,20 @@ mod tests {
     fn tray_right_double_click_does_not_show_main_window() {
         let event = make_double_click_event(MouseButton::Right);
         assert!(!should_show_main_window_from_tray_event(&event));
+    }
+
+    /// Verifies that blocking work is dispatched to a blocking thread.
+    #[test]
+    fn run_blocking_executes_on_different_thread() {
+        let caller_thread = thread::current().id();
+        let worker_thread = tauri::async_runtime::block_on(async {
+            run_blocking(|| Ok(thread::current().id())).await
+        })
+        .expect("Blocking task should complete successfully");
+
+        assert_ne!(
+            caller_thread, worker_thread,
+            "Blocking work should not execute on the caller thread"
+        );
     }
 }
