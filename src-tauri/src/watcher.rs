@@ -41,7 +41,8 @@ impl FileWatcher {
     /// # Arguments
     ///
     /// * `path` - The path to watch.
-    pub fn start(&self, path: PathBuf) -> Result<(), String> {
+    /// * `limit` - The maximum number of backups per game.
+    pub fn start(&self, path: PathBuf, limit: usize) -> Result<(), String> {
         // Stop existing if any
         self.stop();
 
@@ -86,10 +87,10 @@ impl FileWatcher {
 
         // Spawn debouncing thread
         thread::spawn(move || {
-            debounce_loop(rx, watch_target, shutdown_token);
+            debounce_loop(rx, watch_target, shutdown_token, limit);
         });
 
-        info!("Started watching: {:?}", path);
+        info!("Started watching: {:?} (limit: {})", path, limit);
         Ok(())
     }
 
@@ -134,7 +135,7 @@ impl FileWatcher {
 
 /// Performs an immediate scan of the directory and backs up any existing save files.
 /// Uses a batch approach to load/save the index only once.
-pub(crate) fn scan_and_backup_existing(save_dir: &PathBuf) {
+pub(crate) fn scan_and_backup_existing(save_dir: &PathBuf, limit: usize) {
     info!("Performing initial scan of {:?}", save_dir);
     if let Ok(entries) = std::fs::read_dir(save_dir) {
         if let Ok(backup_root) = ensure_backup_root(save_dir) {
@@ -151,6 +152,7 @@ pub(crate) fn scan_and_backup_existing(save_dir: &PathBuf) {
                             &backup_root,
                             info.game_number,
                             &mut index,
+                            limit,
                         ) {
                             error!("Initial backup failed for game {}: {}", info.game_number, e);
                         }
@@ -173,13 +175,15 @@ pub(crate) fn scan_and_backup_existing(save_dir: &PathBuf) {
 /// * `rx` - Receiver for file system events.
 /// * `save_dir` - The directory being watched.
 /// * `shutdown` - Atomic boolean to signal shutdown.
+/// * `limit` - The backup limit per game.
 fn debounce_loop(
     rx: Receiver<notify::Result<notify::Event>>,
     save_dir: PathBuf,
     shutdown: Arc<AtomicBool>,
+    limit: usize,
 ) {
     // Initial Scan: Check for existing saves that need backup
-    scan_and_backup_existing(&save_dir);
+    scan_and_backup_existing(&save_dir, limit);
 
     let mut pending_games: HashSet<u32> = HashSet::new();
     let mut last_change_time = std::time::Instant::now();
@@ -201,7 +205,7 @@ fn debounce_loop(
                 );
 
                 for game_number in pending_games.iter() {
-                    if let Err(e) = perform_backup_for_game(&save_dir, *game_number) {
+                    if let Err(e) = perform_backup_for_game(&save_dir, *game_number, limit) {
                         error!("Backup failed for game {}: {}", game_number, e);
                     }
                 }
@@ -257,7 +261,7 @@ mod tests {
         let watcher = FileWatcher::new();
         let dir = tempdir().unwrap();
         // Just verify it doesn't panic on start/stop
-        assert!(watcher.start(dir.path().to_path_buf()).is_ok());
+        assert!(watcher.start(dir.path().to_path_buf(), 100).is_ok());
         watcher.stop();
     }
 
@@ -267,7 +271,7 @@ mod tests {
         let watcher = FileWatcher::new();
         let dir = tempdir().unwrap();
 
-        assert!(watcher.start(dir.path().to_path_buf()).is_ok());
+        assert!(watcher.start(dir.path().to_path_buf(), 100).is_ok());
         let shutdown_token = watcher.debug_shutdown_token();
 
         watcher.stop();
@@ -276,7 +280,7 @@ mod tests {
             "Shutdown token should be true after stop"
         );
 
-        assert!(watcher.start(dir.path().to_path_buf()).is_ok());
+        assert!(watcher.start(dir.path().to_path_buf(), 100).is_ok());
         assert!(
             shutdown_token.load(Ordering::SeqCst),
             "Shutdown token from the previous thread should remain true after restart"
@@ -338,7 +342,7 @@ mod tests {
         std::fs::write(&save2, "data2").unwrap();
 
         // Run the scan
-        scan_and_backup_existing(&save_dir);
+        scan_and_backup_existing(&save_dir, 100);
 
         // Verify backups created
         let backups_dir = save_dir.join(".backups");
@@ -366,7 +370,7 @@ mod tests {
         let watcher = FileWatcher::new();
         let start_time = std::time::Instant::now();
 
-        watcher.start(save_dir.clone()).unwrap();
+        watcher.start(save_dir.clone(), 100).unwrap();
 
         // Poll for backup folder with a 1.5-second timeout
         // (well below the previous 3s threshold)

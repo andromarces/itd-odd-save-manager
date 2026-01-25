@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use tauri::State;
 
 /// Configuration structure for the application.
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     /// The user-configured path to the game's save directory or file.
     pub save_path: Option<String>,
@@ -18,6 +18,24 @@ pub struct AppConfig {
     /// Whether to automatically close the app when the game exits.
     #[serde(default)]
     pub auto_close: bool,
+    /// Maximum number of backups to keep per game.
+    #[serde(default = "default_max_backups")]
+    pub max_backups_per_game: usize,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            save_path: None,
+            auto_launch_game: false,
+            auto_close: false,
+            max_backups_per_game: default_max_backups(),
+        }
+    }
+}
+
+fn default_max_backups() -> usize {
+    100
 }
 
 /// State wrapper for the application configuration.
@@ -155,7 +173,8 @@ pub async fn set_save_path(
     log::info!("Normalized save path to: {}", final_path_str);
 
     // Update Watcher
-    if let Err(e) = watcher.start(final_path) {
+    let max_backups = config_state.0.lock().unwrap().max_backups_per_game;
+    if let Err(e) = watcher.start(final_path, max_backups) {
         log::error!("Failed to start watcher: {}", e);
 
         // Disable auto-backup on failure
@@ -183,22 +202,37 @@ pub async fn set_save_path(
 ///
 /// * `auto_launch_game` - Enable/disable auto-launch.
 /// * `auto_close` - Enable/disable auto-close.
+/// * `max_backups_per_game` - The limit for backups per game.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn set_game_settings(
     config_state: State<'_, ConfigState>,
+    watcher: State<'_, FileWatcher>,
     auto_launch_game: bool,
     auto_close: bool,
+    max_backups_per_game: usize,
 ) -> Result<(), String> {
     log::info!(
-        "Setting game settings: auto_launch={}, auto_close={}",
+        "Setting game settings: auto_launch={}, auto_close={}, max_backups={}",
         auto_launch_game,
-        auto_close
+        auto_close,
+        max_backups_per_game
     );
 
     update_config(&config_state, |config| {
         config.auto_launch_game = auto_launch_game;
         config.auto_close = auto_close;
-    })
+        config.max_backups_per_game = max_backups_per_game;
+    })?;
+
+    // Restart watcher with new limit if active
+    let config = config_state.0.lock().map_err(|e| e.to_string())?;
+    if let Some(path) = &config.save_path {
+        if let Err(e) = watcher.start(PathBuf::from(path), max_backups_per_game) {
+            log::error!("Failed to restart watcher with new limit: {}", e);
+        }
+    }
+
+    Ok(())
 }
 
 /// Serializes and writes the configuration to disk.
@@ -245,6 +279,7 @@ mod tests {
             save_path: Some("C:\\Test".to_string()),
             auto_launch_game: true,
             auto_close: true,
+            max_backups_per_game: 50,
         };
         let json = serde_json::to_string(&config).unwrap();
         // Field order depends on struct definition or serde implementation.
@@ -252,6 +287,7 @@ mod tests {
         assert!(json.contains(r#""save_path":"C:\\Test""#));
         assert!(json.contains(r#""auto_launch_game":true"#));
         assert!(json.contains(r#""auto_close":true"#));
+        assert!(json.contains(r#""max_backups_per_game":50"#));
     }
 
     /// Tests that the default configuration has expected values.
@@ -261,6 +297,7 @@ mod tests {
         assert!(config.save_path.is_none());
         assert!(!config.auto_launch_game);
         assert!(!config.auto_close);
+        assert_eq!(config.max_backups_per_game, 100);
     }
 
     /// Tests that an invalid path string returns false.
@@ -315,6 +352,7 @@ mod tests {
             save_path: Some("TestPath".to_string()),
             auto_launch_game: true,
             auto_close: false,
+            max_backups_per_game: 200,
         };
         let json = serde_json::to_string(&config).unwrap();
         fs::write(&config_path, json).expect("failed to write config");
@@ -323,6 +361,7 @@ mod tests {
         assert_eq!(loaded.save_path, Some("TestPath".to_string()));
         assert!(loaded.auto_launch_game);
         assert!(!loaded.auto_close);
+        assert_eq!(loaded.max_backups_per_game, 200);
     }
 
     /// Tests loading configuration from a missing file returns default.
@@ -335,6 +374,7 @@ mod tests {
         assert!(loaded.save_path.is_none());
         assert!(!loaded.auto_launch_game);
         assert!(!loaded.auto_close);
+        assert_eq!(loaded.max_backups_per_game, 100);
     }
 
     /// Tests that the config path mirrors the executable name.

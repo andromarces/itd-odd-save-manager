@@ -24,6 +24,7 @@ describe('restore confirmation message', () => {
           save_path: null,
           auto_launch_game: false,
           auto_close: false,
+          max_backups_per_game: 100,
         });
       }
       if (command === 'is_auto_detection_supported') {
@@ -83,6 +84,7 @@ describe('restore confirmation message', () => {
           save_path: null,
           auto_launch_game: false,
           auto_close: false,
+          max_backups_per_game: 100,
         });
       }
       if (command === 'is_auto_detection_supported') {

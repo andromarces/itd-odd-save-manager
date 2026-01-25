@@ -278,6 +278,7 @@ fn backup_info_from_folder(
 ///
 /// * `save_dir` - The directory containing the save files.
 /// * `game_number` - The 0-based game number index.
+/// * `limit` - The maximum number of backups to keep for this game.
 ///
 /// # Returns
 ///
@@ -285,6 +286,7 @@ fn backup_info_from_folder(
 pub fn perform_backup_for_game(
     save_dir: &Path,
     game_number: u32,
+    limit: usize,
 ) -> Result<Option<PathBuf>, String> {
     if !save_dir.exists() {
         return Err(format!("Save directory does not exist: {:?}", save_dir));
@@ -293,7 +295,8 @@ pub fn perform_backup_for_game(
     let backup_root = ensure_backup_root(save_dir)?;
     let mut index = load_index(&backup_root);
 
-    let result = perform_backup_for_game_internal(save_dir, &backup_root, game_number, &mut index)?;
+    let result =
+        perform_backup_for_game_internal(save_dir, &backup_root, game_number, &mut index, limit)?;
 
     save_index(&backup_root, &index);
 
@@ -307,6 +310,7 @@ pub(crate) fn perform_backup_for_game_internal(
     backup_root: &Path,
     game_number: u32,
     index: &mut BackupIndex,
+    limit: usize,
 ) -> Result<Option<PathBuf>, String> {
     let paths = build_save_paths(save_dir, game_number);
     if !paths.main_path.exists() {
@@ -331,6 +335,15 @@ pub(crate) fn perform_backup_for_game_internal(
         return Ok(None);
     }
 
+    // Enforce limit BEFORE creating new backup
+    if let Err(e) = enforce_backup_limit(save_dir, game_number, limit) {
+        log::error!(
+            "Failed to enforce backup limit for game {}: {}",
+            game_number,
+            e
+        );
+    }
+
     let folder_name = filename_utils::format_backup_folder_name(game_number, source.modified_dt);
     let target_dir = create_target_dir(backup_root, &folder_name)?;
     copy_save_files(&paths, &target_dir)?;
@@ -338,6 +351,59 @@ pub(crate) fn perform_backup_for_game_internal(
     update_index_after_backup(index, game_number, hash, &source, folder_name);
 
     Ok(Some(target_dir))
+}
+
+/// Enforces the backup limit for a specific game.
+///
+/// Deletes oldest backups if the count meets or exceeds the limit, ensuring space for one new backup.
+fn enforce_backup_limit(save_dir: &Path, game_number: u32, limit: usize) -> Result<(), String> {
+    // 0 means no limit
+    if limit == 0 {
+        return Ok(());
+    }
+
+    let mut backups = get_backups(save_dir)?
+        .into_iter()
+        .filter(|b| b.game_number == game_number)
+        .collect::<Vec<_>>();
+
+    // Backups are sorted by modified desc (newest first).
+    // If we have N backups and limit is L.
+    // If N >= L, we need to remove (N - L + 1) backups to make room for the new one?
+    // Or just strictly ensure we have < L before adding?
+    // "delete the oldest one before creating a new backup"
+    // implies if count == limit, delete 1.
+    // If count > limit (maybe user changed config), delete enough to be limit - 1.
+
+    if backups.len() >= limit {
+        // We want to keep (limit - 1) backups so that adding 1 results in 'limit' backups.
+        // So we keep the first (limit - 1) items.
+        // We delete everything from index (limit - 1) onwards.
+
+        // Example: Limit 3. Backups: [A, B, C]. Len 3.
+        // We want to add D. Result should be [D, A, B]. C deleted.
+        // Keep: limit - 1 = 2. Keep [A, B]. Delete C.
+
+        let keep_count = if limit > 0 { limit - 1 } else { 0 };
+
+        if backups.len() > keep_count {
+            let to_delete = backups.split_off(keep_count);
+            log::info!(
+                "Enforcing limit ({}): Deleting {} old backups for game {} to make room.",
+                limit,
+                to_delete.len(),
+                game_number
+            );
+
+            for backup in to_delete {
+                let path = PathBuf::from(&backup.path);
+                if path.exists() {
+                    fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Lists all backups available in the .backups directory.
@@ -478,7 +544,7 @@ mod tests {
         }
 
         // 1. Perform backup
-        let result = perform_backup_for_game(save_dir, game_number).unwrap();
+        let result = perform_backup_for_game(save_dir, game_number, 100).unwrap();
         assert!(result.is_some());
         let backup_folder = result.unwrap();
 
@@ -495,7 +561,7 @@ mod tests {
         assert!(index_path.exists());
 
         // 2. Perform duplicate backup (should skip)
-        let result_dup = perform_backup_for_game(save_dir, game_number).unwrap();
+        let result_dup = perform_backup_for_game(save_dir, game_number, 100).unwrap();
         assert!(result_dup.is_none());
 
         // 3. Modify save and backup (should succeed)
@@ -505,7 +571,7 @@ mod tests {
             let mut f = File::create(&main_sav).unwrap();
             writeln!(f, "new data").unwrap();
         }
-        let result_new = perform_backup_for_game(save_dir, game_number).unwrap();
+        let result_new = perform_backup_for_game(save_dir, game_number, 100).unwrap();
         assert!(result_new.is_some());
         assert_ne!(result_new.unwrap(), backup_folder); // Different timestamp folder
 
@@ -527,7 +593,7 @@ mod tests {
         let bak_sav = save_dir.join("gamesave_0.sav.bak");
         File::create(&bak_sav).unwrap();
 
-        let result = perform_backup_for_game(save_dir, game_number).unwrap();
+        let result = perform_backup_for_game(save_dir, game_number, 100).unwrap();
         assert!(result.is_none());
     }
 
@@ -549,7 +615,7 @@ mod tests {
         }
 
         // Backup
-        let backup_folder = perform_backup_for_game(save_dir, game_number)
+        let backup_folder = perform_backup_for_game(save_dir, game_number, 100)
             .unwrap()
             .unwrap();
 
@@ -582,7 +648,7 @@ mod tests {
             writeln!(f, "hash test").unwrap();
         }
 
-        let backup_folder = perform_backup_for_game(save_dir, game_number)
+        let backup_folder = perform_backup_for_game(save_dir, game_number, 100)
             .unwrap()
             .unwrap();
         let hash_file = backup_folder.join(".hash");
@@ -608,14 +674,14 @@ mod tests {
         }
 
         // 1. Create initial backup
-        let result = perform_backup_for_game(save_dir, game_number).unwrap();
+        let result = perform_backup_for_game(save_dir, game_number, 100).unwrap();
         let backup_folder = result.unwrap();
 
         // 2. Simulate user deleting the backup folder manually, but index remains
         fs::remove_dir_all(&backup_folder).unwrap();
 
         // 3. Perform backup again - should detect missing folder and recreate
-        let result_retry = perform_backup_for_game(save_dir, game_number).unwrap();
+        let result_retry = perform_backup_for_game(save_dir, game_number, 100).unwrap();
         assert!(result_retry.is_some());
         let new_backup_folder = result_retry.unwrap();
 
@@ -627,5 +693,48 @@ mod tests {
         // Verify content matches original
         let content = fs::read_to_string(restored_sav).unwrap();
         assert_eq!(content.trim(), "important data");
+    }
+
+    /// Tests that the backup limit is enforced.
+    #[test]
+    fn test_backup_limit_enforcement() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 3;
+        let main_sav = save_dir.join("gamesave_3.sav");
+
+        // Limit to 2 backups
+        let limit = 2;
+
+        for i in 0..4 {
+            {
+                let mut f = File::create(&main_sav).unwrap();
+                writeln!(f, "data {}", i).unwrap();
+            }
+            // Sleep to ensure distinct timestamps
+            if i > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            perform_backup_for_game(save_dir, game_number, limit).unwrap();
+        }
+
+        let backups = get_backups(save_dir).unwrap();
+        assert_eq!(backups.len(), 2);
+
+        // The newest backups should be retained (data 3 and data 2)
+        // Since we slept, timestamps should be ordered.
+        // Backup 0 (data 0) and Backup 1 (data 1) should be gone.
+        // But we need to verify CONTENT to be sure which ones are left.
+
+        // Helper to check content of a backup
+        let check_content = |backup: &BackupInfo, expected: &str| {
+            let path = PathBuf::from(&backup.path).join("gamesave_3.sav");
+            let content = fs::read_to_string(path).unwrap();
+            assert_eq!(content.trim(), expected);
+        };
+
+        // backups[0] is newest
+        check_content(&backups[0], "data 3");
+        check_content(&backups[1], "data 2");
     }
 }

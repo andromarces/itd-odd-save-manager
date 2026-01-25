@@ -119,7 +119,7 @@ async fn init_watcher(
         let path = PathBuf::from(path_str);
         if path.exists() {
             let watcher = app.state::<FileWatcher>();
-            watcher.start(path)?;
+            watcher.start(path, config.max_backups_per_game)?;
         }
     }
     Ok(())

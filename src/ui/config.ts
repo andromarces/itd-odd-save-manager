@@ -11,6 +11,7 @@ type ConfigElements = Pick<
   | 'pathsList'
   | 'autoLaunchCheck'
   | 'autoCloseCheck'
+  | 'maxBackupsInput'
 >;
 
 export interface ConfigFeature {
@@ -88,6 +89,7 @@ export function createConfigFeature(
 
     elements.autoLaunchCheck.checked = config.auto_launch_game;
     elements.autoCloseCheck.checked = config.auto_close;
+    elements.maxBackupsInput.value = config.max_backups_per_game.toString();
 
     logActivity('Configuration loaded.');
   }

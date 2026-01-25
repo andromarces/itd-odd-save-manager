@@ -2,6 +2,7 @@ export interface AppConfig {
   save_path: string | null;
   auto_launch_game: boolean;
   auto_close: boolean;
+  max_backups_per_game: number;
 }
 
 export interface BackupInfo {

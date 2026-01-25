@@ -11,6 +11,7 @@ export interface AppElements {
   launchGameButton: HTMLButtonElement;
   autoLaunchCheck: HTMLInputElement;
   autoCloseCheck: HTMLInputElement;
+  maxBackupsInput: HTMLInputElement;
   tabButtons: NodeListOf<HTMLButtonElement>;
   tabPanels: NodeListOf<HTMLElement>;
 }
@@ -82,6 +83,15 @@ const APP_TEMPLATE = `
       </section>
 
       <section class="panel">
+        <h2>Backup Settings</h2>
+        <div class="input-group">
+          <label for="max-backups-input">Max Backups Per Game:</label>
+          <input type="number" id="max-backups-input" min="0" value="100" />
+        </div>
+        <p class="hint">The limit applies to each game slot individually. Set to 0 for unlimited.</p>
+      </section>
+
+      <section class="panel">
         <h2>Discovery</h2>
         <div class="actions">
           <button id="detect" type="button">Auto Detect Save Path</button>
@@ -117,6 +127,7 @@ export function renderAppShell(): AppElements {
     launchGameButton: getElement<HTMLButtonElement>('#launch-game'),
     autoLaunchCheck: getElement<HTMLInputElement>('#auto-launch-check'),
     autoCloseCheck: getElement<HTMLInputElement>('#auto-close-check'),
+    maxBackupsInput: getElement<HTMLInputElement>('#max-backups-input'),
     tabButtons: document.querySelectorAll<HTMLButtonElement>('.tab-button'),
     tabPanels: document.querySelectorAll<HTMLElement>('.tab-panel'),
   };

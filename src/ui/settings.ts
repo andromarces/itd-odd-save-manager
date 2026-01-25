@@ -3,7 +3,7 @@ import type { AppElements } from './dom';
 
 type SettingsElements = Pick<
   AppElements,
-  'launchGameButton' | 'autoLaunchCheck' | 'autoCloseCheck'
+  'launchGameButton' | 'autoLaunchCheck' | 'autoCloseCheck' | 'maxBackupsInput'
 >;
 
 /**
@@ -16,16 +16,19 @@ export function setupSettingsFeature(elements: SettingsElements): void {
   async function saveGameSettings(): Promise<void> {
     const autoLaunch = elements.autoLaunchCheck.checked;
     const autoClose = elements.autoCloseCheck.checked;
+    const rawMax = parseInt(elements.maxBackupsInput.value, 10);
+    const maxBackups = isNaN(rawMax) ? 100 : rawMax;
 
     await safeInvoke(
       'set_game_settings',
       {
         auto_launch_game: autoLaunch,
         auto_close: autoClose,
+        max_backups_per_game: maxBackups,
       },
       {
         actionName: 'save game settings',
-        successLog: `Updated game settings: Auto-Launch=${autoLaunch}, Auto-Close=${autoClose}`,
+        successLog: `Updated game settings: Auto-Launch=${autoLaunch}, Auto-Close=${autoClose}, Max-Backups=${maxBackups}`,
       },
     );
   }
@@ -66,5 +69,6 @@ export function setupSettingsFeature(elements: SettingsElements): void {
   elements.launchGameButton.addEventListener('click', handleLaunchGameClick);
   elements.autoLaunchCheck.addEventListener('change', handleAutoLaunchChange);
   elements.autoCloseCheck.addEventListener('change', handleAutoCloseChange);
+  elements.maxBackupsInput.addEventListener('change', () => void saveGameSettings());
 }
 
