@@ -32,7 +32,10 @@ export function buildRestoreConfirmationMessage(backup: BackupInfo): string {
 /**
  * Creates a table row for a backup.
  */
-export function createBackupRow(backup: BackupInfo, index: number): HTMLTableRowElement {
+export function createBackupRow(
+  backup: BackupInfo,
+  index: number,
+): HTMLTableRowElement {
   const row = document.createElement('tr');
 
   const fileCell = document.createElement('td');
@@ -47,9 +50,28 @@ export function createBackupRow(backup: BackupInfo, index: number): HTMLTableRow
 
   const actionCell = document.createElement('td');
   actionCell.appendChild(createActionButton('Restore', index, 'restore'));
-  actionCell.appendChild(createActionButton('Lock', index, 'lock', backup.locked ? 'Unlock' : 'Lock', 'secondary'));
-  actionCell.appendChild(createActionButton('Note', index, 'note', 'Note', 'secondary', backup.note ? 'Edit Note' : 'Add Note'));
-  actionCell.appendChild(createActionButton('Delete', index, 'delete', 'Delete', 'danger'));
+  actionCell.appendChild(
+    createActionButton(
+      'Lock',
+      index,
+      'lock',
+      backup.locked ? 'Unlock' : 'Lock',
+      'secondary',
+    ),
+  );
+  actionCell.appendChild(
+    createActionButton(
+      'Note',
+      index,
+      'note',
+      'Note',
+      'secondary',
+      backup.note ? 'Edit Note' : 'Add Note',
+    ),
+  );
+  actionCell.appendChild(
+    createActionButton('Delete', index, 'delete', 'Delete', 'danger'),
+  );
 
   row.appendChild(fileCell);
   row.appendChild(dateCell);
@@ -81,11 +103,13 @@ function createActionButton(
   action: string,
   displayLabel?: string,
   className?: string,
-  title?: string
+  title?: string,
 ): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.textContent = displayLabel || label;
-  btn.className = `small ${className || ''}`.trim();
+  const baseClassName = `small ${className || ''}`.trim();
+  btn.className =
+    action === 'lock' ? `${baseClassName} lock-toggle`.trim() : baseClassName;
   btn.dataset.index = index.toString();
   btn.dataset.action = action;
   if (title) btn.title = title;

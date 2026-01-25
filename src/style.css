@@ -52,6 +52,7 @@ body {
   margin-bottom: 8px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--color-border);
+  text-align: center;
 }
 
 .kicker {
@@ -65,7 +66,7 @@ body {
 h1 {
   font-family: Georgia, 'Times New Roman', serif;
   font-size: 2.5rem;
-  font-style: italic;
+  font-style: normal;
   font-weight: 400;
   margin: 0 0 8px 0;
   color: var(--color-text-primary);
@@ -205,6 +206,11 @@ button.small {
   font-size: 0.8rem;
 }
 
+button.small.lock-toggle {
+  width: 72px;
+  text-align: center;
+}
+
 button.secondary {
   background-color: transparent;
   border-color: var(--color-border-accent);
@@ -286,6 +292,32 @@ table {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
+}
+
+#backups-table {
+  table-layout: fixed;
+  width: max-content;
+}
+
+#backups-table th:nth-child(1),
+#backups-table td:nth-child(1) {
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+}
+
+#backups-table th:nth-child(2),
+#backups-table td:nth-child(2) {
+  width: 220px;
+}
+
+#backups-table th:nth-child(3),
+#backups-table td:nth-child(3) {
+  width: 280px;
+}
+
+#backups-table tbody tr:not(.note-row) td:first-child {
+  white-space: normal;
 }
 
 th,
@@ -466,6 +498,7 @@ tr.note-row td {
   flex-direction: column;
   gap: 8px;
   max-height: 150px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
