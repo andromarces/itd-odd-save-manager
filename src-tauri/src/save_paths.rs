@@ -61,6 +61,8 @@ pub(crate) fn is_auto_detection_supported() -> bool {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    #[cfg(not(target_os = "windows"))]
+    use tauri::async_runtime::block_on;
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -102,7 +104,7 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn detect_steam_save_paths_returns_empty_on_non_windows() {
-        let results = detect_steam_save_paths();
+        let results = block_on(detect_steam_save_paths());
 
         assert!(results.is_empty());
     }

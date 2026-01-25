@@ -7,11 +7,12 @@ import {
   getBackupDisplayName,
 } from './ui/backups';
 import { createConfigFeature } from './ui/config';
-import { renderAppShell } from './ui/dom';
+import { renderAppShell, setupTabNavigation } from './ui/dom';
 import { setupSettingsFeature } from './ui/settings';
 import { initWatcherAfterPaint } from './ui/watcher';
 
 const elements = renderAppShell();
+setupTabNavigation(elements);
 const backupsFeature = createBackupsFeature(elements);
 const configFeature = createConfigFeature(elements, {
   loadBackups: backupsFeature.loadBackups,
