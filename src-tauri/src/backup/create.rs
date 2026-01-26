@@ -155,6 +155,7 @@ pub(crate) fn perform_backup_for_game_internal(
     game_number: u32,
     index: &mut BackupIndex,
     limit: usize,
+    backups: &[BackupInfo],
 ) -> Result<Option<PathBuf>, String> {
     let paths = build_save_paths(save_dir, game_number);
     if !paths.main_path.exists() {
@@ -180,16 +181,15 @@ pub(crate) fn perform_backup_for_game_internal(
         return Ok(None);
     }
 
-    // 2. Fetch full backup list (once) for fallback checks and limit enforcement
-    let backups = get_backups(save_dir, true).unwrap_or_default();
+    // 2. Backups are now passed in (backups list fetched once by caller)
 
     // 3. Fallback duplicate check (Content scan)
-    if is_duplicate_by_content(index, game_number, &hash, &source, &backups) {
+    if is_duplicate_by_content(index, game_number, &hash, &source, backups) {
         return Ok(None);
     }
 
     // 4. Enforce limit
-    if let Err(e) = enforce_backup_limit(game_number, limit, &backups) {
+    if let Err(e) = enforce_backup_limit(game_number, limit, backups) {
         log::error!(
             "Failed to enforce backup limit for game {}: {}",
             game_number,
@@ -218,6 +218,7 @@ pub fn perform_backup_for_game(
     }
 
     let mut store = BackupStore::new(save_dir)?;
+    let backups = get_backups(save_dir, true).unwrap_or_default();
 
     let result = perform_backup_for_game_internal(
         save_dir,
@@ -225,6 +226,7 @@ pub fn perform_backup_for_game(
         game_number,
         &mut store.index,
         limit,
+        &backups,
     )?;
 
     store.save();

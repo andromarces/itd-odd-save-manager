@@ -130,6 +130,8 @@ fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: us
     let mut backups_created = false;
     if let Ok(backup_root) = ensure_backup_root(save_dir) {
         let mut index = load_index(&backup_root);
+        let backups = crate::backup::get_backups(save_dir, true).unwrap_or_default();
+
         for &game_number in game_numbers {
             match perform_backup_for_game_internal(
                 save_dir,
@@ -137,6 +139,7 @@ fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: us
                 game_number,
                 &mut index,
                 limit,
+                &backups,
             ) {
                 Ok(Some(_)) => backups_created = true,
                 Ok(None) => {}
