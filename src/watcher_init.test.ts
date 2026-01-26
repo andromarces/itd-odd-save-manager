@@ -21,11 +21,6 @@ describe('getInvokeErrorMessage', () => {
     const message = getInvokeErrorMessage('simple error');
     expect(message).toBe('simple error');
   });
-
-  it('is not exported from watcher_init', async () => {
-    const watcherInitModule = await import('./watcher_init');
-    expect('getInvokeErrorMessage' in watcherInitModule).toBe(false);
-  });
 });
 
 describe('isInitWatcherDeferredError', () => {

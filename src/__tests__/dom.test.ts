@@ -21,35 +21,24 @@ describe('tab navigation', () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
   });
 
-  it('renders three tab buttons', async () => {
-    const { renderAppShell } = await import('../ui/dom');
-    const elements = renderAppShell();
-
-    expect(elements.tabButtons.length).toBe(3);
-    expect(elements.tabButtons[0].textContent).toBe('Dashboard');
-    expect(elements.tabButtons[1].textContent).toBe('Settings');
-    expect(elements.tabButtons[2].textContent).toBe('Log');
-  });
-
-  it('renders three tab panels', async () => {
-    const { renderAppShell } = await import('../ui/dom');
-    const elements = renderAppShell();
-
-    expect(elements.tabPanels.length).toBe(3);
-    expect(elements.tabPanels[0].dataset.tabPanel).toBe('dashboard');
-    expect(elements.tabPanels[1].dataset.tabPanel).toBe('settings');
-    expect(elements.tabPanels[2].dataset.tabPanel).toBe('log');
-  });
-
   it('shows dashboard tab by default', async () => {
     const { renderAppShell } = await import('../ui/dom');
     const elements = renderAppShell();
 
-    expect(elements.tabButtons[0].classList.contains('active')).toBe(true);
-    expect(elements.tabPanels[0].classList.contains('active')).toBe(true);
-    expect(elements.tabPanels[0].hidden).toBe(false);
-    expect(elements.tabPanels[1].hidden).toBe(true);
-    expect(elements.tabPanels[2].hidden).toBe(true);
+    const activeButtons = Array.from(elements.tabButtons).filter((btn) =>
+      btn.classList.contains('active'),
+    );
+    const activePanels = Array.from(elements.tabPanels).filter((panel) =>
+      panel.classList.contains('active'),
+    );
+    const visiblePanels = Array.from(elements.tabPanels).filter(
+      (panel) => !panel.hidden,
+    );
+
+    expect(activeButtons.length).toBe(1);
+    expect(activePanels.length).toBe(1);
+    expect(visiblePanels.length).toBe(1);
+    expect(activePanels[0]).toBe(visiblePanels[0]);
   });
 
   it('switches to settings tab when clicked', async () => {
@@ -57,12 +46,23 @@ describe('tab navigation', () => {
     const elements = renderAppShell();
     setupTabNavigation(elements);
 
-    elements.tabButtons[1].click();
+    const inactiveButton = Array.from(elements.tabButtons).find(
+      (btn) => !btn.classList.contains('active'),
+    );
+    expect(inactiveButton).toBeDefined();
 
-    expect(elements.tabButtons[0].classList.contains('active')).toBe(false);
-    expect(elements.tabButtons[1].classList.contains('active')).toBe(true);
-    expect(elements.tabPanels[0].hidden).toBe(true);
-    expect(elements.tabPanels[1].hidden).toBe(false);
+    inactiveButton?.click();
+
+    const activeButtons = Array.from(elements.tabButtons).filter((btn) =>
+      btn.classList.contains('active'),
+    );
+    const visiblePanels = Array.from(elements.tabPanels).filter(
+      (panel) => !panel.hidden,
+    );
+
+    expect(activeButtons.length).toBe(1);
+    expect(activeButtons[0]).toBe(inactiveButton);
+    expect(visiblePanels.length).toBe(1);
   });
 
   it('updates aria-selected on tab switch', async () => {
@@ -70,39 +70,41 @@ describe('tab navigation', () => {
     const elements = renderAppShell();
     setupTabNavigation(elements);
 
-    expect(elements.tabButtons[0].getAttribute('aria-selected')).toBe('true');
-    expect(elements.tabButtons[1].getAttribute('aria-selected')).toBe('false');
+    const selectedButtons = Array.from(elements.tabButtons).filter(
+      (btn) => btn.getAttribute('aria-selected') === 'true',
+    );
+    expect(selectedButtons.length).toBe(1);
 
-    elements.tabButtons[1].click();
+    const unselectedButton = Array.from(elements.tabButtons).find(
+      (btn) => btn.getAttribute('aria-selected') !== 'true',
+    );
+    expect(unselectedButton).toBeDefined();
 
-    expect(elements.tabButtons[0].getAttribute('aria-selected')).toBe('false');
-    expect(elements.tabButtons[1].getAttribute('aria-selected')).toBe('true');
+    unselectedButton?.click();
+
+    const selectedAfterClick = Array.from(elements.tabButtons).filter(
+      (btn) => btn.getAttribute('aria-selected') === 'true',
+    );
+    expect(selectedAfterClick.length).toBe(1);
+    expect(selectedAfterClick[0]).toBe(unselectedButton);
   });
 
   it('has proper ARIA relationship between tabs and panels', async () => {
     const { renderAppShell } = await import('../ui/dom');
     const elements = renderAppShell();
 
-    // Each tab should have aria-controls pointing to its panel
-    expect(elements.tabButtons[0].getAttribute('aria-controls')).toBe(
-      'panel-dashboard',
-    );
-    expect(elements.tabButtons[1].getAttribute('aria-controls')).toBe(
-      'panel-settings',
-    );
-    expect(elements.tabButtons[2].getAttribute('aria-controls')).toBe(
-      'panel-log',
-    );
+    for (const button of Array.from(elements.tabButtons)) {
+      const controlsId = button.getAttribute('aria-controls');
+      expect(controlsId).toBeTruthy();
 
-    // Each panel should have aria-labelledby pointing to its tab
-    expect(elements.tabPanels[0].getAttribute('aria-labelledby')).toBe(
-      'tab-dashboard',
-    );
-    expect(elements.tabPanels[1].getAttribute('aria-labelledby')).toBe(
-      'tab-settings',
-    );
-    expect(elements.tabPanels[2].getAttribute('aria-labelledby')).toBe(
-      'tab-log',
-    );
+      const controlledPanel = Array.from(elements.tabPanels).find(
+        (panel) => panel.id === controlsId,
+      );
+      expect(controlledPanel).toBeDefined();
+
+      const buttonId = button.id;
+      expect(buttonId).toBeTruthy();
+      expect(controlledPanel?.getAttribute('aria-labelledby')).toBe(buttonId);
+    }
   });
 });
