@@ -77,12 +77,9 @@ export function buildRestoreConfirmationMessage(backup: BackupInfo): string {
 /**
  * Creates a table row for a backup.
  */
-export function createBackupRow(
-  backup: BackupInfo,
-  index: number,
-): HTMLTableRowElement {
+export function createBackupRow(backup: BackupInfo): HTMLTableRowElement {
   const row = document.createElement('tr');
-  row.dataset.index = index.toString();
+  row.dataset.backupId = backup.path;
 
   const fileCell = document.createElement('td');
   fileCell.textContent = getBackupDisplayName(backup);
@@ -95,11 +92,11 @@ export function createBackupRow(
   dateCell.textContent = formatDate(backup.modified);
 
   const actionCell = document.createElement('td');
-  actionCell.appendChild(createActionButton('Restore', index, 'restore'));
+  actionCell.appendChild(createActionButton('Restore', backup.path, 'restore'));
   actionCell.appendChild(
     createActionButton(
       'Lock',
-      index,
+      backup.path,
       'lock',
       backup.locked ? 'Unlock' : 'Lock',
       'secondary',
@@ -108,7 +105,7 @@ export function createBackupRow(
   actionCell.appendChild(
     createActionButton(
       'Note',
-      index,
+      backup.path,
       'note',
       'Note',
       'secondary',
@@ -116,7 +113,7 @@ export function createBackupRow(
     ),
   );
   actionCell.appendChild(
-    createActionButton('Delete', index, 'delete', 'Delete', 'danger'),
+    createActionButton('Delete', backup.path, 'delete', 'Delete', 'danger'),
   );
 
   row.appendChild(fileCell);
@@ -145,7 +142,7 @@ export function createNoteRow(note: string): HTMLTableRowElement {
  */
 function createActionButton(
   label: string,
-  index: number,
+  id: string,
   action: string,
   displayLabel?: string,
   className?: string,
@@ -156,7 +153,7 @@ function createActionButton(
   const baseClassName = `small ${className || ''}`.trim();
   btn.className =
     action === 'lock' ? `${baseClassName} lock-toggle`.trim() : baseClassName;
-  btn.dataset.index = index.toString();
+  btn.dataset.backupId = id;
   btn.dataset.action = action;
   if (title) btn.title = title;
   if (action !== 'restore') btn.style.marginLeft = '8px';

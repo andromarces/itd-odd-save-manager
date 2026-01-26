@@ -24,7 +24,9 @@ function createBackup(overrides: Partial<BackupInfo> = {}): BackupInfo {
 describe('formatDate', () => {
   it('formats a date with all expected components', () => {
     const formatted = formatDate('2026-01-09T03:04:08');
-    expect(formatted).toMatch(/^\d{2}\/\w{3}\/\d{4} \d{2}:\d{2}:\d{2} (AM|PM)$/);
+    expect(formatted).toMatch(
+      /^\d{2}\/\w{3}\/\d{4} \d{2}:\d{2}:\d{2} (AM|PM)$/,
+    );
     expect(formatted).toContain('2026');
     expect(formatted).toContain('Jan');
   });
@@ -33,10 +35,13 @@ describe('formatDate', () => {
 describe('createBackupRow', () => {
   it('renders a formatted date in one of the cells', () => {
     const backup = createBackup();
-    const row = createBackupRow(backup, 0);
+    const row = createBackupRow(backup);
+    expect(row.dataset.backupId).toBe(backup.path);
     const cells = Array.from(row.querySelectorAll('td'));
     const formattedDate = formatDate(backup.modified);
-    const cellWithDate = cells.find((cell) => cell.textContent === formattedDate);
+    const cellWithDate = cells.find(
+      (cell) => cell.textContent === formattedDate,
+    );
     expect(cellWithDate).toBeDefined();
   });
 });

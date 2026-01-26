@@ -41,6 +41,7 @@ export function createBackupsFeature(
   elements: BackupsElements,
 ): BackupsFeature {
   let currentBackups: BackupInfo[] = [];
+  let currentBackupsMap = new Map<string, BackupInfo>();
 
   const masterDelete = new MasterDeleteController(elements, () =>
     loadBackups(),
@@ -49,6 +50,15 @@ export function createBackupsFeature(
   const unlistenPromise = listen('backups-updated', () => {
     void loadBackups();
   });
+
+  /**
+   * Helper to find a row by backup ID.
+   */
+  function findRowByBackupId(id: string): HTMLTableRowElement | undefined {
+    return Array.from(elements.backupsList.children).find(
+      (el) => (el as HTMLElement).dataset.backupId === id,
+    ) as HTMLTableRowElement | undefined;
+  }
 
   /**
    * Renders the list of backups into the table body.
@@ -61,8 +71,8 @@ export function createBackupsFeature(
     }
 
     const fragment = document.createDocumentFragment();
-    backups.forEach((backup, index) => {
-      fragment.appendChild(createBackupRow(backup, index));
+    backups.forEach((backup) => {
+      fragment.appendChild(createBackupRow(backup));
       if (backup.note) {
         fragment.appendChild(createNoteRow(backup.note));
       }
@@ -94,6 +104,7 @@ export function createBackupsFeature(
 
     if (backups) {
       currentBackups = backups;
+      currentBackupsMap = new Map(backups.map((b) => [b.path, b]));
       renderBackups(backups);
       logActivity(`Loaded ${backups.length} backups.`);
     }
@@ -120,16 +131,16 @@ export function createBackupsFeature(
     );
 
     if (success !== undefined) {
+      // Update local state
       backup.locked = !backup.locked;
-      const index = currentBackups.indexOf(backup);
-      const row = elements.backupsList.querySelector(
-        `tr[data-index="${index}"]`,
-      );
 
-      if (row && index > -1) {
-        const newRow = createBackupRow(backup, index);
+      const row = findRowByBackupId(backup.path);
+
+      if (row) {
+        const newRow = createBackupRow(backup);
         elements.backupsList.replaceChild(newRow, row);
       } else {
+        // Fallback if row not found (shouldn't happen usually)
         renderBackups(currentBackups);
       }
     }
@@ -157,13 +168,10 @@ export function createBackupsFeature(
 
     if (success !== undefined) {
       backup.note = newNote.trim() || null;
-      const index = currentBackups.indexOf(backup);
-      const row = elements.backupsList.querySelector(
-        `tr[data-index="${index}"]`,
-      );
+      const row = findRowByBackupId(backup.path);
 
-      if (row && index > -1) {
-        const newRow = createBackupRow(backup, index);
+      if (row) {
+        const newRow = createBackupRow(backup);
         elements.backupsList.replaceChild(newRow, row);
 
         const nextSibling = newRow.nextElementSibling;
@@ -209,10 +217,29 @@ export function createBackupsFeature(
     );
 
     if (success !== undefined) {
-      const index = currentBackups.indexOf(backup);
+      // Find index by path, not object identity, to handle potential list refreshes
+      // Assumption: backup.path is unique and stable (canonicalized by backend)
+      const index = currentBackups.findIndex((b) => b.path === backup.path);
       if (index > -1) {
         currentBackups.splice(index, 1);
+        currentBackupsMap.delete(backup.path);
         renderBackups(currentBackups);
+      } else {
+        // Fallback: if we can't find it locally (maybe list refreshed)
+        if (elements.manualInput.value) {
+          void loadBackups();
+        } else {
+          // If input is empty, we can't reload, but we can try to clean up the stale DOM row
+          const row = findRowByBackupId(backup.path);
+          if (row) {
+            row.remove();
+            // Also remove associated note row if present
+            const nextSibling = row.nextElementSibling;
+            if (nextSibling?.classList.contains('note-row')) {
+              nextSibling.remove();
+            }
+          }
+        }
       }
     }
   }
@@ -247,9 +274,10 @@ export function createBackupsFeature(
     const target = event.target as HTMLElement;
     const button = target.closest('button');
 
-    if (button && button.dataset.index) {
-      const index = parseInt(button.dataset.index, 10);
-      const backup = currentBackups[index];
+    if (button && button.dataset.backupId) {
+      const id = button.dataset.backupId;
+      const backup = currentBackupsMap.get(id);
+
       if (backup) {
         const action = button.dataset.action;
         if (action === 'restore') {
