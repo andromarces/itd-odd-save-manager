@@ -127,10 +127,32 @@ export async function invokeAction<T>(
   command: string,
   args: Record<string, unknown> | undefined,
   actionDescription: string,
-  options: Omit<SafeInvokeOptions, 'actionName'> = {}
+  options: Omit<SafeInvokeOptions, 'actionName'> = {},
 ): Promise<T | undefined> {
   return safeInvoke<T>(command, args, {
     actionName: actionDescription,
     ...options,
   });
+}
+
+/**
+ * Helper to manage button state during async operations.
+ * Captures the current text, disables the button, sets busy text, runs the action,
+ * and finally restores the original state.
+ */
+export async function withBusyButton(
+  btn: HTMLButtonElement,
+  busyText: string,
+  action: () => Promise<void>,
+): Promise<void> {
+  const originalText = btn.textContent;
+  const wasDisabled = btn.disabled;
+  btn.disabled = true;
+  btn.textContent = busyText;
+  try {
+    await action();
+  } finally {
+    btn.disabled = wasDisabled;
+    btn.textContent = originalText;
+  }
 }

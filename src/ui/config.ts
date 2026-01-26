@@ -1,4 +1,4 @@
-import { logActivity, safeInvoke } from '../ui_utils';
+import { logActivity, safeInvoke, withBusyButton } from '../ui_utils';
 import type { AppElements } from './dom';
 import type { AppConfig, StatusType } from './types';
 
@@ -37,26 +37,8 @@ export function createConfigFeature(
    */
   function setStatus(message: string, type: StatusType = 'info'): void {
     elements.configStatus.textContent = message;
-    elements.configStatus.className = `status-text ${type !== 'info' ? type : ''}`.trim();
-  }
-
-  /**
-   * Helper to manage button state during async operations.
-   */
-  async function withBusyButton(
-    btn: HTMLButtonElement,
-    busyText: string,
-    action: () => Promise<void>
-  ): Promise<void> {
-    const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = busyText;
-    try {
-      await action();
-    } finally {
-      btn.disabled = false;
-      btn.textContent = originalText;
-    }
+    elements.configStatus.className =
+      `status-text ${type !== 'info' ? type : ''}`.trim();
   }
 
   /**
@@ -122,7 +104,7 @@ export function createConfigFeature(
 
     await withBusyButton(elements.saveButton, 'Validating...', async () => {
       setStatus('Validating...', 'info');
-      
+
       const isValid = await safeInvoke<boolean>(
         'validate_path',
         { path },
@@ -212,10 +194,7 @@ export function createConfigFeature(
     const path = li.textContent;
     if (path) {
       elements.manualInput.value = path;
-      setStatus(
-        'Path selected from list. Click "Set Path" to save.',
-        'info',
-      );
+      setStatus('Path selected from list. Click "Set Path" to save.', 'info');
     }
   }
 

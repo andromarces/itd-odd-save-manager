@@ -1,4 +1,4 @@
-import { invokeAction, logActivity } from '../../ui_utils';
+import { invokeAction, logActivity, withBusyButton } from '../../ui_utils';
 import type { AppElements } from '../dom';
 import type { BackupInfo } from '../types';
 
@@ -118,29 +118,31 @@ export class MasterDeleteController {
 
     if (!confirm(confirmMsg)) return;
 
-    this.elements.masterDeleteConfirmBtn.disabled = true;
-    this.elements.masterDeleteConfirmBtn.textContent = 'Deleting...';
+    await withBusyButton(
+      this.elements.masterDeleteConfirmBtn,
+      'Deleting...',
+      async () => {
+        const deletedCount = await invokeAction<number>(
+          'batch_delete_backups_command',
+          {
+            game_numbers: selectedGames,
+            keep_latest: keepLatest,
+            delete_locked: deleteLocked,
+          },
+          'batch delete',
+          {
+            onError: () => logActivity('Failed to perform batch delete.'),
+          },
+        );
 
-    const deletedCount = await invokeAction<number>(
-      'batch_delete_backups_command',
-      {
-        game_numbers: selectedGames,
-        keep_latest: keepLatest,
-        delete_locked: deleteLocked,
-      },
-      'batch delete',
-      {
-        onError: () => logActivity('Failed to perform batch delete.'),
+        if (deletedCount !== undefined) {
+          logActivity(
+            `Batch delete completed. Removed ${deletedCount} backups.`,
+          );
+          this.close();
+          await this.onComplete();
+        }
       },
     );
-
-    if (deletedCount !== undefined) {
-      logActivity(`Batch delete completed. Removed ${deletedCount} backups.`);
-      this.close();
-      await this.onComplete();
-    }
-
-    this.elements.masterDeleteConfirmBtn.disabled = false;
-    this.elements.masterDeleteConfirmBtn.textContent = 'Delete';
   }
 }

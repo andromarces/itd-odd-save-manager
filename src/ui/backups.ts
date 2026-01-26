@@ -1,4 +1,4 @@
-import { invokeAction, logActivity } from '../ui_utils';
+import { invokeAction, logActivity, withBusyButton } from '../ui_utils';
 import { listen } from '@tauri-apps/api/event';
 import type { AppElements } from './dom';
 import type { BackupInfo } from './types';
@@ -87,30 +87,30 @@ export function createBackupsFeature(
   async function loadBackups(): Promise<void> {
     if (!elements.manualInput.value) return;
 
-    elements.refreshBackupsButton.textContent = 'Refreshing...';
-    elements.refreshBackupsButton.disabled = true;
+    await withBusyButton(
+      elements.refreshBackupsButton,
+      'Refreshing...',
+      async () => {
+        const backups = await invokeAction<BackupInfo[]>(
+          'get_backups_command',
+          undefined,
+          'load backups',
+          {
+            onError: () => {
+              elements.backupsList.innerHTML =
+                '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
+            },
+          },
+        );
 
-    const backups = await invokeAction<BackupInfo[]>(
-      'get_backups_command',
-      undefined,
-      'load backups',
-      {
-        onError: () => {
-          elements.backupsList.innerHTML =
-            '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
-        },
+        if (backups) {
+          currentBackups = backups;
+          currentBackupsMap = new Map(backups.map((b) => [b.path, b]));
+          renderBackups(backups);
+          logActivity(`Loaded ${backups.length} backups.`);
+        }
       },
     );
-
-    if (backups) {
-      currentBackups = backups;
-      currentBackupsMap = new Map(backups.map((b) => [b.path, b]));
-      renderBackups(backups);
-      logActivity(`Loaded ${backups.length} backups.`);
-    }
-
-    elements.refreshBackupsButton.textContent = 'Refresh Backups';
-    elements.refreshBackupsButton.disabled = false;
   }
 
   /**
