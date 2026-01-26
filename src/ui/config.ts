@@ -29,6 +29,7 @@ export interface ConfigFeature {
 
 export interface ConfigDependencies {
   loadBackups: () => Promise<void>;
+  setRefreshAvailability: (isEnabled: boolean) => void;
 }
 
 /**
@@ -38,11 +39,31 @@ export function createConfigFeature(
   elements: ConfigElements,
   deps: ConfigDependencies,
 ): ConfigFeature {
+  let currentValidPath: string | null = null;
+
   /**
    * Updates the configuration status message.
    */
   function setStatus(message: string, type: StatusType = 'info'): void {
     updateStatus(elements.configStatus, message, type);
+  }
+
+  /**
+   * Updates the refresh availability based on the current input and valid path.
+   */
+  function updateRefreshAvailability(): void {
+    const inputValue = elements.manualInput.value.trim();
+    const hasValidPath =
+      currentValidPath !== null && inputValue === currentValidPath;
+    deps.setRefreshAvailability(hasValidPath);
+  }
+
+  /**
+   * Sets the current valid path and refresh availability state.
+   */
+  function setValidPath(path: string | null): void {
+    currentValidPath = path;
+    updateRefreshAvailability();
   }
 
   /**
@@ -83,10 +104,12 @@ export function createConfigFeature(
     if (config.save_path) {
       elements.manualInput.value = config.save_path;
       setStatus('Configuration loaded.', 'info');
+      setValidPath(config.save_path);
       void deps.loadBackups();
     } else {
       elements.manualInput.value = '';
       setStatus('No save path configured.', 'info');
+      setValidPath(null);
     }
 
     elements.autoLaunchCheck.checked = config.auto_launch_game;
@@ -141,6 +164,7 @@ export function createConfigFeature(
       if (!normalizedPath) return;
 
       elements.manualInput.value = normalizedPath;
+      setValidPath(normalizedPath);
       setStatus('Save path updated successfully.', 'success');
       logActivity(`Save path updated: ${normalizedPath}`);
       void deps.loadBackups();
@@ -173,6 +197,7 @@ export function createConfigFeature(
           if (!elements.manualInput.value) {
             elements.manualInput.value = paths[0];
             setStatus('Path detected. Click "Set Path" to save.', 'info');
+            updateRefreshAvailability();
           }
         } else {
           logActivity('No paths detected.');
@@ -199,7 +224,15 @@ export function createConfigFeature(
     if (path) {
       elements.manualInput.value = path;
       setStatus('Path selected from list. Click "Set Path" to save.', 'info');
+      updateRefreshAvailability();
     }
+  }
+
+  /**
+   * Handles manual path input changes.
+   */
+  function handleManualPathInput(): void {
+    updateRefreshAvailability();
   }
 
   /**
@@ -231,6 +264,9 @@ export function createConfigFeature(
   elements.detectButton.addEventListener('click', onDetectClick);
   elements.saveButton.addEventListener('click', onSaveClick);
   elements.pathsList.addEventListener('click', handlePathSelectionClick);
+  elements.manualInput.addEventListener('input', handleManualPathInput);
+
+  updateRefreshAvailability();
 
   return {
     loadConfig,
@@ -241,6 +277,7 @@ export function createConfigFeature(
       elements.detectButton.removeEventListener('click', onDetectClick);
       elements.saveButton.removeEventListener('click', onSaveClick);
       elements.pathsList.removeEventListener('click', handlePathSelectionClick);
+      elements.manualInput.removeEventListener('input', handleManualPathInput);
     },
   };
 }

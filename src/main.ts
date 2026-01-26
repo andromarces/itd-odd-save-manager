@@ -16,6 +16,7 @@ setupTabNavigation(elements);
 const backupsFeature = createBackupsFeature(elements);
 const configFeature = createConfigFeature(elements, {
   loadBackups: backupsFeature.loadBackups,
+  setRefreshAvailability: backupsFeature.setRefreshAvailability,
 });
 
 const settingsFeature = setupSettingsFeature(elements);

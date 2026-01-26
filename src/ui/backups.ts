@@ -31,6 +31,7 @@ type BackupsElements = Pick<
 
 export interface BackupsFeature {
   loadBackups: () => Promise<void>;
+  setRefreshAvailability: (isEnabled: boolean) => void;
   destroy: () => void;
 }
 
@@ -111,6 +112,13 @@ export function createBackupsFeature(
         }
       },
     );
+  }
+
+  /**
+   * Updates whether the refresh button is enabled for a valid save path.
+   */
+  function setRefreshAvailability(isEnabled: boolean): void {
+    elements.refreshBackupsButton.disabled = !isEnabled;
   }
 
   /**
@@ -308,6 +316,7 @@ export function createBackupsFeature(
 
   return {
     loadBackups,
+    setRefreshAvailability,
     destroy: () => {
       void unlistenPromise.then((unlisten) => unlisten());
       masterDelete.destroy();
