@@ -1,4 +1,9 @@
-import { logActivity, safeInvoke, withBusyButton } from '../ui_utils';
+import {
+  logActivity,
+  safeInvoke,
+  updateStatus,
+  withBusyButton,
+} from '../ui_utils';
 import type { AppElements } from './dom';
 import type { AppConfig, StatusType } from './types';
 
@@ -19,6 +24,7 @@ export interface ConfigFeature {
   savePath: () => Promise<void>;
   detectSteamSavePaths: () => Promise<void>;
   applyAutoDetectionAvailability: () => Promise<void>;
+  destroy: () => void;
 }
 
 export interface ConfigDependencies {
@@ -36,9 +42,7 @@ export function createConfigFeature(
    * Updates the configuration status message.
    */
   function setStatus(message: string, type: StatusType = 'info'): void {
-    elements.configStatus.textContent = message;
-    elements.configStatus.className =
-      `status-text ${type !== 'info' ? type : ''}`.trim();
+    updateStatus(elements.configStatus, message, type);
   }
 
   /**
@@ -221,8 +225,11 @@ export function createConfigFeature(
     elements.pathsList.appendChild(item);
   }
 
-  elements.detectButton.addEventListener('click', () => detectSteamSavePaths());
-  elements.saveButton.addEventListener('click', () => savePath());
+  const onDetectClick = () => void detectSteamSavePaths();
+  const onSaveClick = () => void savePath();
+
+  elements.detectButton.addEventListener('click', onDetectClick);
+  elements.saveButton.addEventListener('click', onSaveClick);
   elements.pathsList.addEventListener('click', handlePathSelectionClick);
 
   return {
@@ -230,5 +237,10 @@ export function createConfigFeature(
     savePath,
     detectSteamSavePaths,
     applyAutoDetectionAvailability,
+    destroy: () => {
+      elements.detectButton.removeEventListener('click', onDetectClick);
+      elements.saveButton.removeEventListener('click', onSaveClick);
+      elements.pathsList.removeEventListener('click', handlePathSelectionClick);
+    },
   };
 }

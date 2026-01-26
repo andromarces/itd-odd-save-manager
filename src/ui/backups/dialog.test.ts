@@ -158,6 +158,7 @@ describe('MasterDeleteController', () => {
   });
 
   it('re-enables the confirm button even if onComplete throws', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     const elements = createAppElements();
     const onComplete = vi.fn().mockRejectedValue(new Error('Refresh failed'));
 

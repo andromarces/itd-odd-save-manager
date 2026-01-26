@@ -156,3 +156,75 @@ export async function withBusyButton<T>(
     btn.textContent = originalText;
   }
 }
+
+/**
+ * Standardizes status text updates across the UI.
+ * Applies the 'status-text' class and optionally 'success' or 'error'.
+ */
+export function updateStatus(
+  element: HTMLElement,
+  message: string,
+  type: 'info' | 'success' | 'error' = 'info',
+): void {
+  element.textContent = message;
+  element.classList.add('status-text');
+  element.classList.toggle('success', type === 'success');
+  element.classList.toggle('error', type === 'error');
+}
+
+const MONTH_ABBREVIATIONS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/**
+ * Pads a number to two digits.
+ */
+function padTwoDigits(value: number): string {
+  return value.toString().padStart(2, '0');
+}
+
+/**
+ * Formats a local hour value into 12-hour time.
+ */
+function formatHour12(hours24: number): string {
+  const hours12 = hours24 % 12 || 12;
+  return padTwoDigits(hours12);
+}
+
+/**
+ * Returns the meridiem marker for a local hour value.
+ */
+function formatMeridiem(hours24: number): string {
+  return hours24 >= 12 ? 'PM' : 'AM';
+}
+
+/**
+ * Formats an ISO date string as dd/MMM/yyyy hh:mm:ss AM/PM.
+ */
+export function formatDate(isoString: string): string {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) {
+    return isoString;
+  }
+
+  const day = padTwoDigits(date.getDate());
+  const month = MONTH_ABBREVIATIONS[date.getMonth()] ?? '???';
+  const year = date.getFullYear().toString();
+  const hours = formatHour12(date.getHours());
+  const minutes = padTwoDigits(date.getMinutes());
+  const seconds = padTwoDigits(date.getSeconds());
+  const meridiem = formatMeridiem(date.getHours());
+
+  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds} ${meridiem}`;
+}

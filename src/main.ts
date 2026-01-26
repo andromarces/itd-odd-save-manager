@@ -18,7 +18,7 @@ const configFeature = createConfigFeature(elements, {
   loadBackups: backupsFeature.loadBackups,
 });
 
-setupSettingsFeature(elements);
+const settingsFeature = setupSettingsFeature(elements);
 
 /**
  * Applies platform-specific auto-detection availability to the UI.
@@ -39,4 +39,6 @@ initWatcherAfterPaint();
 // Cleanup
 window.addEventListener('beforeunload', () => {
   backupsFeature.destroy();
+  configFeature.destroy();
+  settingsFeature.destroy();
 });

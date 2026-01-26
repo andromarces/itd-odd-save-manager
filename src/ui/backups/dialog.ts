@@ -27,13 +27,37 @@ export class MasterDeleteController {
     this.elements = elements;
     this.onComplete = onComplete;
 
-    this.elements.masterDeleteCancelBtn.addEventListener('click', () =>
-      this.close(),
+    this.elements.masterDeleteCancelBtn.addEventListener(
+      'click',
+      this.handleCancel,
     );
-    this.elements.masterDeleteForm.addEventListener('submit', (e) =>
-      this.handleSubmit(e),
+    this.elements.masterDeleteForm.addEventListener(
+      'submit',
+      this.handleSubmitEvent,
     );
   }
+
+  /**
+   * Cleans up event listeners.
+   */
+  destroy() {
+    this.elements.masterDeleteCancelBtn.removeEventListener(
+      'click',
+      this.handleCancel,
+    );
+    this.elements.masterDeleteForm.removeEventListener(
+      'submit',
+      this.handleSubmitEvent,
+    );
+  }
+
+  private handleCancel = () => {
+    this.close();
+  };
+
+  private handleSubmitEvent = (e: Event) => {
+    void this.handleSubmit(e);
+  };
 
   /**
    * Opens the master delete dialog with the provided backups.

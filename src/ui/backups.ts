@@ -299,16 +299,30 @@ export function createBackupsFeature(
     }
   }
 
+  const onMasterDeleteClick = () => masterDelete.open(currentBackups);
+  const onRefreshClick = () => void loadBackups();
+
   elements.backupsTable.addEventListener('click', handleBackupsTableClick);
-  elements.masterDeleteButton.addEventListener('click', () =>
-    masterDelete.open(currentBackups),
-  );
-  elements.refreshBackupsButton.addEventListener('click', () => loadBackups());
+  elements.masterDeleteButton.addEventListener('click', onMasterDeleteClick);
+  elements.refreshBackupsButton.addEventListener('click', onRefreshClick);
 
   return {
     loadBackups,
     destroy: () => {
       void unlistenPromise.then((unlisten) => unlisten());
+      masterDelete.destroy();
+      elements.backupsTable.removeEventListener(
+        'click',
+        handleBackupsTableClick,
+      );
+      elements.masterDeleteButton.removeEventListener(
+        'click',
+        onMasterDeleteClick,
+      );
+      elements.refreshBackupsButton.removeEventListener(
+        'click',
+        onRefreshClick,
+      );
     },
   };
 }

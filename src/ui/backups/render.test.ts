@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BackupInfo } from '../types';
-import { createBackupRow, createNoteRow, formatDate } from './render';
+import { createBackupRow, createNoteRow } from './render';
+import { formatDate } from '../../ui_utils';
 
 /**
  * Creates a backup info object for render tests.
