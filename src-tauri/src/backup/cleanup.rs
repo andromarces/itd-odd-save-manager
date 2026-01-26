@@ -28,7 +28,7 @@ pub fn delete_backups_batch(
     keep_latest: bool,
     delete_locked: bool,
 ) -> Result<usize, String> {
-    let mut backups = get_backups(save_dir, false)?;
+    let mut backups = get_backups(save_dir, false, None)?;
     let mut deleted_count = 0;
 
     // Group backups by game number

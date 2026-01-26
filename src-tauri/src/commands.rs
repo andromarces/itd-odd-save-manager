@@ -48,7 +48,7 @@ fn verify_backup_path(save_path: &Path, backup_path: &Path) -> Result<PathBuf, S
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_backups_command(state: State<'_, ConfigState>) -> Result<Vec<BackupInfo>, String> {
     if let Some(path) = extract_save_path(&state)? {
-        run_blocking(move || backup::get_backups(&path, false)).await
+        run_blocking(move || backup::get_backups(&path, false, None)).await
     } else {
         Ok(Vec::new())
     }

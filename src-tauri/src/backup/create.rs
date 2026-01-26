@@ -218,7 +218,7 @@ pub fn perform_backup_for_game(
     }
 
     let mut store = BackupStore::new(save_dir)?;
-    let backups = get_backups(save_dir, true).unwrap_or_default();
+    let backups = get_backups(save_dir, true, Some(game_number)).unwrap_or_default();
 
     let result = perform_backup_for_game_internal(
         save_dir,

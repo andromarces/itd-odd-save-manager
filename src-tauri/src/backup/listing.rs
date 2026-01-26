@@ -6,7 +6,11 @@ use std::fs;
 use std::path::Path;
 
 /// Lists all backups available in the .backups directory.
-pub fn get_backups(save_dir: &Path, include_hash: bool) -> Result<Vec<BackupInfo>, String> {
+pub fn get_backups(
+    save_dir: &Path,
+    include_hash: bool,
+    game_filter: Option<u32>,
+) -> Result<Vec<BackupInfo>, String> {
     let store = match BackupStore::load_if_exists(save_dir)? {
         Some(s) => s,
         None => return Ok(Vec::new()),
@@ -21,7 +25,7 @@ pub fn get_backups(save_dir: &Path, include_hash: bool) -> Result<Vec<BackupInfo
         if path.is_dir() {
             let folder_name = entry.file_name().to_string_lossy().to_string();
             if let Some(mut info) =
-                backup_info_from_folder(&path, &folder_name, save_dir, include_hash)?
+                backup_info_from_folder(&path, &folder_name, save_dir, include_hash, game_filter)?
             {
                 if let Some(note) = store.index.notes.get(&info.filename) {
                     info.note = Some(note.clone());
@@ -43,10 +47,17 @@ pub(crate) fn backup_info_from_folder(
     folder_name: &str,
     save_dir: &Path,
     include_hash: bool,
+    game_filter: Option<u32>,
 ) -> Result<Option<BackupInfo>, String> {
     let Some(info) = filename_utils::parse_backup_folder_name(folder_name) else {
         return Ok(None);
     };
+
+    if let Some(filter) = game_filter {
+        if info.game_number != filter {
+            return Ok(None);
+        }
+    }
 
     let main_filename = format!("gamesave_{}.sav", info.game_number);
     let main_file_path = path.join(&main_filename);

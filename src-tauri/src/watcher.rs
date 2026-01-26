@@ -130,7 +130,12 @@ fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: us
     let mut backups_created = false;
     if let Ok(backup_root) = ensure_backup_root(save_dir) {
         let mut index = load_index(&backup_root);
-        let backups = crate::backup::get_backups(save_dir, true).unwrap_or_default();
+        let filter = if game_numbers.len() == 1 {
+            game_numbers.iter().next().cloned()
+        } else {
+            None
+        };
+        let backups = crate::backup::get_backups(save_dir, true, filter).unwrap_or_default();
 
         for &game_number in game_numbers {
             match perform_backup_for_game_internal(
@@ -336,7 +341,7 @@ mod tests {
         let index_path = backups_dir.join("index.json");
         assert!(index_path.exists());
 
-        let backups = crate::backup::get_backups(&save_dir, true).unwrap();
+        let backups = crate::backup::get_backups(&save_dir, true, None).unwrap();
         assert_eq!(backups.len(), 2);
 
         let games: std::collections::HashSet<u32> = backups.iter().map(|b| b.game_number).collect();

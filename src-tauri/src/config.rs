@@ -218,17 +218,24 @@ pub async fn set_game_settings(
         max_backups_per_game
     );
 
+    let limit_changed = {
+        let guard = config_state.0.lock().map_err(|e| e.to_string())?;
+        guard.max_backups_per_game != max_backups_per_game
+    };
+
     update_config(&config_state, |config| {
         config.auto_launch_game = auto_launch_game;
         config.auto_close = auto_close;
         config.max_backups_per_game = max_backups_per_game;
     })?;
 
-    // Restart watcher with new limit if active
-    let config = config_state.0.lock().map_err(|e| e.to_string())?;
-    if let Some(path) = &config.save_path {
-        if let Err(e) = watcher.start(PathBuf::from(path), max_backups_per_game, None) {
-            log::error!("Failed to restart watcher with new limit: {}", e);
+    if limit_changed {
+        // Restart watcher with new limit if active
+        let config = config_state.0.lock().map_err(|e| e.to_string())?;
+        if let Some(path) = &config.save_path {
+            if let Err(e) = watcher.start(PathBuf::from(path), max_backups_per_game, None) {
+                log::error!("Failed to restart watcher with new limit: {}", e);
+            }
         }
     }
 

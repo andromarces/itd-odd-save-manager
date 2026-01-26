@@ -37,7 +37,7 @@ mod tests {
         fs::create_dir_all(&invalid_folder).unwrap();
 
         let result =
-            backup_info_from_folder(&invalid_folder, "not-a-backup", save_dir, true).unwrap();
+            backup_info_from_folder(&invalid_folder, "not-a-backup", save_dir, true, None).unwrap();
         assert!(result.is_none());
     }
 
@@ -87,7 +87,7 @@ mod tests {
         assert_ne!(result_new.unwrap(), backup_folder); // Different timestamp folder
 
         // 4. List backups
-        let backups = get_backups(save_dir, true).unwrap();
+        let backups = get_backups(save_dir, true, None).unwrap();
         assert_eq!(backups.len(), 2);
         assert_eq!(backups[0].game_number, 1);
         // Verify folder name logic in listing
@@ -227,7 +227,7 @@ mod tests {
             perform_backup_for_game(save_dir, game_number, limit).unwrap();
         }
 
-        let backups = get_backups(save_dir, true).unwrap();
+        let backups = get_backups(save_dir, true, None).unwrap();
         assert_eq!(backups.len(), 2);
 
         // Helper to check content of a backup
@@ -286,7 +286,7 @@ mod tests {
             .unwrap();
 
         // Check backups
-        let backups = get_backups(save_dir, true).unwrap();
+        let backups = get_backups(save_dir, true, None).unwrap();
         assert_eq!(backups.len(), 3);
 
         // Verify content
@@ -310,7 +310,7 @@ mod tests {
         }
         perform_backup_for_game(save_dir, game_number, limit).unwrap();
 
-        let backups_final = get_backups(save_dir, true).unwrap();
+        let backups_final = get_backups(save_dir, true, None).unwrap();
         assert_eq!(backups_final.len(), 3);
 
         check_content(&backups_final[0], "data 4");
@@ -403,7 +403,7 @@ mod tests {
         );
 
         // 5. Verify get_backups retrieves it
-        let backups = get_backups(save_dir, true).unwrap();
+        let backups = get_backups(save_dir, true, None).unwrap();
         assert_eq!(backups[0].note.as_deref(), Some("Updated Note"));
 
         // 6. Remove note
@@ -442,21 +442,21 @@ mod tests {
         create_backup("v3", false);
         create_backup("v4", false); // Newest
 
-        let backups = get_backups(save_dir, true).unwrap();
+        let backups = get_backups(save_dir, true, None).unwrap();
         assert_eq!(backups.len(), 4);
 
         // Scenario 1: Delete all but latest, EXCLUDE locked.
         let deleted = delete_backups_batch(save_dir, &[game_number], true, false).unwrap();
         assert_eq!(deleted, 2, "Should delete v1 and v3");
 
-        let remaining = get_backups(save_dir, true).unwrap();
+        let remaining = get_backups(save_dir, true, None).unwrap();
         assert_eq!(remaining.len(), 2);
 
         // Scenario 2: Delete ALL, INCLUDE locked.
         let deleted_2 = delete_backups_batch(save_dir, &[game_number], false, true).unwrap();
         assert_eq!(deleted_2, 2);
 
-        let final_backups = get_backups(save_dir, true).unwrap();
+        let final_backups = get_backups(save_dir, true, None).unwrap();
         assert!(final_backups.is_empty());
     }
 }
