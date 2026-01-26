@@ -164,6 +164,12 @@ pub(crate) fn scan_and_backup_existing(save_dir: &Path, limit: usize) -> bool {
     if let Ok(entries) = std::fs::read_dir(save_dir) {
         let mut pending_games = HashSet::new();
         for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if !name.starts_with("gamesave_") {
+                    continue;
+                }
+            }
+
             if let Some(info) = filename_utils::parse_path(&entry.path()) {
                 if !info.is_bak {
                     pending_games.insert(info.game_number);

@@ -82,6 +82,7 @@ export function createBackupRow(
   index: number,
 ): HTMLTableRowElement {
   const row = document.createElement('tr');
+  row.dataset.index = index.toString();
 
   const fileCell = document.createElement('td');
   fileCell.textContent = getBackupDisplayName(backup);

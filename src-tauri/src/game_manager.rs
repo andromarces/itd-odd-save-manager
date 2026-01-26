@@ -61,7 +61,7 @@ mod tests {
 pub fn start_monitor<R: Runtime>(app: AppHandle<R>) {
     log::info!("Starting game process monitor...");
     thread::spawn(move || {
-        let mut sys = System::new_all();
+        let mut sys = System::new();
         let mut game_was_running = false;
 
         loop {

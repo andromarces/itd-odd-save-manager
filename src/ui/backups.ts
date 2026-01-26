@@ -121,7 +121,17 @@ export function createBackupsFeature(
 
     if (success !== undefined) {
       backup.locked = !backup.locked;
-      renderBackups(currentBackups);
+      const index = currentBackups.indexOf(backup);
+      const row = elements.backupsList.querySelector(
+        `tr[data-index="${index}"]`,
+      );
+
+      if (row && index > -1) {
+        const newRow = createBackupRow(backup, index);
+        elements.backupsList.replaceChild(newRow, row);
+      } else {
+        renderBackups(currentBackups);
+      }
     }
   }
 
@@ -147,7 +157,31 @@ export function createBackupsFeature(
 
     if (success !== undefined) {
       backup.note = newNote.trim() || null;
-      renderBackups(currentBackups);
+      const index = currentBackups.indexOf(backup);
+      const row = elements.backupsList.querySelector(
+        `tr[data-index="${index}"]`,
+      );
+
+      if (row && index > -1) {
+        const newRow = createBackupRow(backup, index);
+        elements.backupsList.replaceChild(newRow, row);
+
+        const nextSibling = newRow.nextElementSibling;
+        const hasNoteRow = nextSibling?.classList.contains('note-row');
+
+        if (backup.note) {
+          const newNoteRow = createNoteRow(backup.note);
+          if (hasNoteRow && nextSibling) {
+            elements.backupsList.replaceChild(newNoteRow, nextSibling);
+          } else {
+            newRow.insertAdjacentElement('afterend', newNoteRow);
+          }
+        } else if (hasNoteRow && nextSibling) {
+          elements.backupsList.removeChild(nextSibling);
+        }
+      } else {
+        renderBackups(currentBackups);
+      }
     }
   }
 
