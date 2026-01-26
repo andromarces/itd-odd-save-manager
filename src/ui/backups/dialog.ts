@@ -118,31 +118,34 @@ export class MasterDeleteController {
 
     if (!confirm(confirmMsg)) return;
 
-    await withBusyButton(
-      this.elements.masterDeleteConfirmBtn,
-      'Deleting...',
-      async () => {
-        const deletedCount = await invokeAction<number>(
-          'batch_delete_backups_command',
-          {
-            game_numbers: selectedGames,
-            keep_latest: keepLatest,
-            delete_locked: deleteLocked,
-          },
-          'batch delete',
-          {
-            onError: () => logActivity('Failed to perform batch delete.'),
-          },
-        );
-
-        if (deletedCount !== undefined) {
-          logActivity(
-            `Batch delete completed. Removed ${deletedCount} backups.`,
+    const btn = this.elements.masterDeleteConfirmBtn;
+    try {
+      const deletedCount = await withBusyButton(
+        btn,
+        'Deleting...',
+        async () => {
+          return await invokeAction<number>(
+            'batch_delete_backups_command',
+            {
+              game_numbers: selectedGames,
+              keep_latest: keepLatest,
+              delete_locked: deleteLocked,
+            },
+            'batch delete',
+            {
+              onError: () => logActivity('Failed to perform batch delete.'),
+            },
           );
-          this.close();
-          await this.onComplete();
-        }
-      },
-    );
+        },
+      );
+
+      if (deletedCount !== undefined) {
+        logActivity(`Batch delete completed. Removed ${deletedCount} backups.`);
+        this.close();
+        await this.onComplete();
+      }
+    } catch (error) {
+      console.error('Master delete flow failed:', error);
+    }
   }
 }

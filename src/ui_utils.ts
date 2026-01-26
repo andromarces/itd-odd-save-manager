@@ -138,19 +138,19 @@ export async function invokeAction<T>(
 /**
  * Helper to manage button state during async operations.
  * Captures the current text, disables the button, sets busy text, runs the action,
- * and finally restores the original state.
+ * and finally restores the original state. Returns the result of the action.
  */
-export async function withBusyButton(
+export async function withBusyButton<T>(
   btn: HTMLButtonElement,
   busyText: string,
-  action: () => Promise<void>,
-): Promise<void> {
+  action: () => Promise<T>,
+): Promise<T> {
   const originalText = btn.textContent;
   const wasDisabled = btn.disabled;
   btn.disabled = true;
   btn.textContent = busyText;
   try {
-    await action();
+    return await action();
   } finally {
     btn.disabled = wasDisabled;
     btn.textContent = originalText;
