@@ -1,4 +1,5 @@
 import { invokeAction, logActivity } from '../ui_utils';
+import { listen } from '@tauri-apps/api/event';
 import type { AppElements } from './dom';
 import type { BackupInfo } from './types';
 import {
@@ -30,6 +31,7 @@ type BackupsElements = Pick<
 
 export interface BackupsFeature {
   loadBackups: () => Promise<void>;
+  destroy: () => void;
 }
 
 /**
@@ -43,6 +45,10 @@ export function createBackupsFeature(
   const masterDelete = new MasterDeleteController(elements, () =>
     loadBackups(),
   );
+
+  const unlistenPromise = listen('backups-updated', () => {
+    void loadBackups();
+  });
 
   /**
    * Renders the list of backups into the table body.
@@ -239,5 +245,8 @@ export function createBackupsFeature(
 
   return {
     loadBackups,
+    destroy: () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    },
   };
 }

@@ -32,7 +32,14 @@ impl FileWatcher {
     }
 
     /// Starts watching the specified path.
-    pub fn start(&self, path: PathBuf, limit: usize) -> Result<(), String> {
+    ///
+    /// * `on_backup` - Optional callback invoked when one or more backups are successfully created.
+    pub fn start(
+        &self,
+        path: PathBuf,
+        limit: usize,
+        on_backup: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
+    ) -> Result<(), String> {
         self.stop();
 
         let (tx, rx) = channel();
@@ -69,7 +76,7 @@ impl FileWatcher {
         }
 
         thread::spawn(move || {
-            debounce_loop(rx, watch_target, shutdown_token, limit);
+            debounce_loop(rx, watch_target, shutdown_token, limit, on_backup);
         });
 
         info!("Started watching: {:?} (limit: {})", path, limit);
@@ -113,30 +120,38 @@ impl FileWatcher {
 }
 
 /// Executes backups for a set of games with a shared index load and save.
-fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: usize) {
+///
+/// Returns `true` if at least one backup was successfully created.
+fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: usize) -> bool {
     if game_numbers.is_empty() {
-        return;
+        return false;
     }
 
+    let mut backups_created = false;
     if let Ok(backup_root) = ensure_backup_root(save_dir) {
         let mut index = load_index(&backup_root);
         for &game_number in game_numbers {
-            if let Err(e) = perform_backup_for_game_internal(
+            match perform_backup_for_game_internal(
                 save_dir,
                 &backup_root,
                 game_number,
                 &mut index,
                 limit,
             ) {
-                error!("Backup failed for game {}: {}", game_number, e);
+                Ok(Some(_)) => backups_created = true,
+                Ok(None) => {}
+                Err(e) => error!("Backup failed for game {}: {}", game_number, e),
             }
         }
         save_index(&backup_root, &index);
     }
+    backups_created
 }
 
 /// Performs an immediate scan of the directory and backs up any existing save files.
-pub(crate) fn scan_and_backup_existing(save_dir: &Path, limit: usize) {
+///
+/// Returns `true` if at least one backup was successfully created during the scan.
+pub(crate) fn scan_and_backup_existing(save_dir: &Path, limit: usize) -> bool {
     info!("Performing initial scan of {:?}", save_dir);
     if let Ok(entries) = std::fs::read_dir(save_dir) {
         let mut pending_games = HashSet::new();
@@ -147,8 +162,9 @@ pub(crate) fn scan_and_backup_existing(save_dir: &Path, limit: usize) {
                 }
             }
         }
-        perform_batch_backups(save_dir, &pending_games, limit);
+        return perform_batch_backups(save_dir, &pending_games, limit);
     }
+    false
 }
 
 /// Runs the debounce loop to process file system events.
@@ -157,9 +173,14 @@ fn debounce_loop(
     save_dir: PathBuf,
     shutdown: Arc<AtomicBool>,
     limit: usize,
+    on_backup: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
 ) {
     // Initial Scan: Check for existing saves that need backup
-    scan_and_backup_existing(&save_dir, limit);
+    if scan_and_backup_existing(&save_dir, limit) {
+        if let Some(cb) = &on_backup {
+            cb();
+        }
+    }
 
     let mut pending_games: HashSet<u32> = HashSet::new();
     let mut last_change_time = std::time::Instant::now();
@@ -178,7 +199,11 @@ fn debounce_loop(
                     "Debounce timeout. Backing up {} games.",
                     pending_games.len()
                 );
-                perform_batch_backups(&save_dir, &pending_games, limit);
+                if perform_batch_backups(&save_dir, &pending_games, limit) {
+                    if let Some(cb) = &on_backup {
+                        cb();
+                    }
+                }
                 pending_games.clear();
                 pending_change = false;
                 Duration::from_secs(60)
@@ -224,7 +249,7 @@ mod tests {
     fn test_file_watcher_lifecycle() {
         let watcher = FileWatcher::new();
         let dir = tempdir().unwrap();
-        assert!(watcher.start(dir.path().to_path_buf(), 100).is_ok());
+        assert!(watcher.start(dir.path().to_path_buf(), 100, None).is_ok());
         watcher.stop();
     }
 
@@ -234,7 +259,7 @@ mod tests {
         let watcher = FileWatcher::new();
         let dir = tempdir().unwrap();
 
-        assert!(watcher.start(dir.path().to_path_buf(), 100).is_ok());
+        assert!(watcher.start(dir.path().to_path_buf(), 100, None).is_ok());
         let shutdown_token = watcher.debug_shutdown_token();
 
         watcher.stop();
@@ -243,7 +268,7 @@ mod tests {
             "Shutdown token should be true after stop"
         );
 
-        assert!(watcher.start(dir.path().to_path_buf(), 100).is_ok());
+        assert!(watcher.start(dir.path().to_path_buf(), 100, None).is_ok());
         assert!(
             shutdown_token.load(Ordering::SeqCst),
             "Shutdown token from the previous thread should remain true after restart"
@@ -327,7 +352,7 @@ mod tests {
         let watcher = FileWatcher::new();
         let start_time = std::time::Instant::now();
 
-        watcher.start(save_dir.clone(), 100).unwrap();
+        watcher.start(save_dir.clone(), 100, None).unwrap();
 
         let mut found = false;
         for _ in 0..15 {

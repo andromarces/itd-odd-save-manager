@@ -35,3 +35,8 @@ void configFeature.loadConfig();
 
 // Initialize watcher strictly after UI is shown (post-paint)
 initWatcherAfterPaint();
+
+// Cleanup
+window.addEventListener('beforeunload', () => {
+  backupsFeature.destroy();
+});

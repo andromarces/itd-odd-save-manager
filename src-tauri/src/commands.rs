@@ -2,7 +2,8 @@ use crate::backup::{self, BackupInfo};
 use crate::config::ConfigState;
 use crate::watcher::FileWatcher;
 use std::path::{Path, PathBuf};
-use tauri::{async_runtime, Manager, State};
+use std::sync::Arc;
+use tauri::{async_runtime, Emitter, Manager, State};
 
 /// Extracts the configured save path without holding the mutex across blocking work.
 fn extract_save_path(state: &State<'_, ConfigState>) -> Result<Option<PathBuf>, String> {
@@ -149,7 +150,13 @@ pub async fn init_watcher(
         let path = PathBuf::from(path_str);
         if path.exists() {
             let watcher = app.state::<FileWatcher>();
-            watcher.start(path, config.max_backups_per_game)?;
+            let app_handle = app.clone();
+            let on_backup = Arc::new(move || {
+                if let Err(e) = app_handle.emit("backups-updated", ()) {
+                    log::error!("Failed to emit backups-updated event: {}", e);
+                }
+            });
+            watcher.start(path, config.max_backups_per_game, Some(on_backup))?;
         }
     }
     Ok(())

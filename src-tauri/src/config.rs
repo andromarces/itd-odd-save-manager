@@ -174,7 +174,7 @@ pub async fn set_save_path(
 
     // Update Watcher
     let max_backups = config_state.0.lock().unwrap().max_backups_per_game;
-    if let Err(e) = watcher.start(final_path, max_backups) {
+    if let Err(e) = watcher.start(final_path, max_backups, None) {
         log::error!("Failed to start watcher: {}", e);
 
         // Disable auto-backup on failure
@@ -227,7 +227,7 @@ pub async fn set_game_settings(
     // Restart watcher with new limit if active
     let config = config_state.0.lock().map_err(|e| e.to_string())?;
     if let Some(path) = &config.save_path {
-        if let Err(e) = watcher.start(PathBuf::from(path), max_backups_per_game) {
+        if let Err(e) = watcher.start(PathBuf::from(path), max_backups_per_game, None) {
             log::error!("Failed to restart watcher with new limit: {}", e);
         }
     }

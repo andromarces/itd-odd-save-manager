@@ -10,7 +10,7 @@ mod tests {
     use crate::backup::restore::restore_backup;
     use std::fs::{self, File};
     use std::io::Write;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     /// Tests that save paths are constructed consistently for a game slot.
