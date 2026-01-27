@@ -28,19 +28,20 @@ export interface AppElements {
 
 const APP_TEMPLATE = `
   <main class="layout">
-    <header class="header">
-      <h1>ITD ODD Save Manager</h1>
-      <p class="subhead">
-        Manage your save files for Into the Dead: Our Darkest Days.
-      </p>
-    </header>
+    <div>
+      <header class="header">
+        <h1>ITD ODD Save Manager</h1>
+        <p class="subhead">
+          Manage your save files for Into the Dead: Our Darkest Days.
+        </p>
+      </header>
 
-    <nav class="tab-nav" role="tablist">
-      <button id="tab-dashboard" class="tab-button active" data-tab="dashboard" role="tab" aria-selected="true" aria-controls="panel-dashboard">Dashboard</button>
-      <button id="tab-settings" class="tab-button" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings">Settings</button>
-      <button id="tab-log" class="tab-button" data-tab="log" role="tab" aria-selected="false" aria-controls="panel-log">Log</button>
-    </nav>
-
+      <nav class="tab-nav" role="tablist">
+        <button id="tab-dashboard" class="tab-button active" data-tab="dashboard" role="tab" aria-selected="true" aria-controls="panel-dashboard">Dashboard</button>
+        <button id="tab-settings" class="tab-button" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings">Settings</button>
+        <button id="tab-log" class="tab-button" data-tab="log" role="tab" aria-selected="false" aria-controls="panel-log">Log</button>
+      </nav>
+    </div>
     <div id="panel-dashboard" class="tab-panel active" data-tab-panel="dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
       <section class="panel">
         <h2>Game Launcher</h2>
