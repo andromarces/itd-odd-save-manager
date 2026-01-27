@@ -18,6 +18,13 @@ fn should_show_main_window_from_tray_event(event: &TrayIconEvent) -> bool {
     }
 }
 
+/// Resolves the tray tooltip text from the configured product name.
+fn tray_tooltip_text(product_name: Option<&str>) -> String {
+    product_name
+        .map(std::string::ToString::to_string)
+        .unwrap_or_else(|| "ITD ODD Save Manager".to_string())
+}
+
 /// Creates and configures the system tray icon and menu.
 pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let status_i = MenuItem::with_id(app, "status", "Status: Monitoring", false, None::<&str>)?;
@@ -54,6 +61,7 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             }
         })
         .icon(icon)
+        .tooltip(tray_tooltip_text(app.config().product_name.as_deref()))
         .build(app)?;
 
     app.manage(TrayState(tray));
@@ -112,5 +120,19 @@ mod tests {
     fn tray_right_double_click_does_not_show_main_window() {
         let event = make_double_click_event(MouseButton::Right);
         assert!(!should_show_main_window_from_tray_event(&event));
+    }
+
+    /// Verifies that the tray tooltip prefers the configured product name.
+    #[test]
+    fn tray_tooltip_uses_product_name_when_available() {
+        let tooltip = tray_tooltip_text(Some("Configured Name"));
+        assert_eq!(tooltip, "Configured Name");
+    }
+
+    /// Verifies that the tray tooltip falls back to the default name.
+    #[test]
+    fn tray_tooltip_falls_back_to_default_name() {
+        let tooltip = tray_tooltip_text(None);
+        assert_eq!(tooltip, "ITD ODD Save Manager");
     }
 }
