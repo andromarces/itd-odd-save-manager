@@ -9,6 +9,7 @@ mod save_paths;
 mod tray;
 mod watcher;
 mod window;
+mod wrapper_launch;
 
 use config::{AppConfig, ConfigState};
 use std::path::Path;
@@ -47,6 +48,9 @@ pub fn run() {
     let initial_config = bootstrap_config(&config_path);
     let watcher = FileWatcher::new();
 
+    // Check for wrapper mode (Steam Launch Options: "Manager.exe" %command%)
+    let launched_via_wrapper = wrapper_launch::maybe_launch_from_wrapper_args();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -71,8 +75,8 @@ pub fn run() {
             // Start Game Monitor
             game_manager::start_monitor(app.handle().clone());
 
-            // Auto Launch Game if enabled
-            if initial_config.auto_launch_game {
+            // Auto Launch Game if enabled (skip if already launched via wrapper)
+            if initial_config.auto_launch_game && !launched_via_wrapper {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(1));
