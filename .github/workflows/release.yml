@@ -75,12 +75,20 @@ jobs:
             Compress-Archive -Path $exe -DestinationPath "artifacts/$zipName"
           }
 
-          # Normalize filenames: Replace spaces with dots in EXE and MSI files
+          # Normalize filenames: Replace spaces with hyphens
           Get-ChildItem -Path artifacts -File | ForEach-Object {
-            if ($_.Name -like "* *" -and ($_.Extension -eq ".exe" -or $_.Extension -eq ".msi")) {
-              $newName = $_.Name -replace " ", "."
+            if ($_.Name -like "* *") {
+              $newName = $_.Name -replace " ", "-"
               Rename-Item $_.FullName -NewName $newName
             }
+          }
+
+          # Validate artifact naming conventions
+          $invalidFiles = Get-ChildItem -Path artifacts -File | Where-Object { $_.Name -match ' ' }
+          if ($invalidFiles) {
+            Write-Error "Invalid artifact names detected (spaces found):"
+            $invalidFiles | ForEach-Object { Write-Error " - $($_.Name)" }
+            exit 1
           }
 
           Set-Location artifacts
