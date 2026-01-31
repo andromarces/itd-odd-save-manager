@@ -61,15 +61,16 @@ For detailed build instructions and reproducibility steps, please refer to [BUIL
 ## Verification
 
 Integrity verification steps:
-1.  The `SHA256SUMS.txt` file is available on the [GitHub Release](https://github.com/andromarces/itd-odd-save-manager/releases).
-2.  The SHA256 hash of the downloaded installer or zip file is calculated.
-3.  The calculated hash is compared with the one in the text file.
+
+1. The `SHA256SUMS.txt` file is available on the [GitHub Release](https://github.com/andromarces/itd-odd-save-manager/releases).
+2. The SHA256 hash of the downloaded installer or zip file is calculated.
+3. The calculated hash is compared with the one in the text file.
 
 ## Privacy & Security
 
-*   **Local-First**: All save data and backups are stored locally on the local machine.
-*   **No Telemetry**: This application does not collect or transmit user data.
-*   **Network**: The application is offline-capable.
+- **Local-First**: All save data and backups are stored locally on the local machine.
+- **No Telemetry**: This application does not collect or transmit user data.
+- **Network**: The application is offline-capable.
 
 ## License & Attribution
 

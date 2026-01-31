@@ -13,9 +13,9 @@ The project supports the latest release version. The most recent version availab
 
 If a security vulnerability is discovered within this project, responsible disclosure should be prioritized.
 
-1.  **Public GitHub issues should NOT be created for vulnerability reports.**
-2.  Reports should be sent to andromarces@gmail.com (or the profile contact info).
-3.  Reports should include a detailed description of the vulnerability and steps to reproduce it.
+1. **Public GitHub issues should NOT be created for vulnerability reports.**
+2. Reports should be sent to [andromarces@gmail.com](mailto:andromarces@gmail.com) (or the profile contact info).
+3. Reports should include a detailed description of the vulnerability and steps to reproduce it.
 
 Receipt of reports will be acknowledged, and a fix or mitigation will be provided in a timely manner.
 
@@ -26,5 +26,6 @@ All official releases are built via GitHub Actions. The integrity of the downloa
 ## Network Activity
 
 This application is designed to be local-first. It does not send analytics or telemetry.
-*   **Updates**: Automatic updates are not currently implemented.
-*   **Cloud Sync**: No cloud sync is currently implemented. All files remain on the local disk.
+
+- **Updates**: Automatic updates are not currently implemented.
+- **Cloud Sync**: No cloud sync is currently implemented. All files remain on the local disk.
