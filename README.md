@@ -1,13 +1,13 @@
 # ITD ODD Save Manager
 
-Portable auto-save backup app for _Into the Dead: Our Darkest Days_.
+Auto-save backup app for _Into the Dead: Our Darkest Days_.
 
 ## Features
 
 - **Auto-Detection**: Automatically finds the local save folder on Windows at `%USERPROFILE%\AppData\LocalLow\PikPok\IntoTheDeadOurDarkestDays`.
-- **Manual Override**: Allows selecting any custom folder or file to watch.
-- **Automated Backups**: Watches for changes and creates timestamped backups instantly.
-- **Smart Restore**: browse and restore backups with a single click.
+- **Manual Folder Selection**: Allows selecting a custom folder to watch.
+- **Automated Backups**: Watches for changes and creates timestamped backups automatically.
+- **Smart Restore**: browse and restore backups with easy confirmation.
 - **Game Integration**:
   - Launch the game directly from the app.
   - **Auto-Launch**: Optional setting to launch the game when the app starts.

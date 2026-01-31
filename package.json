@@ -10,6 +10,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "tauri": "tauri",
     "format": "cd src-tauri && cargo fmt",
     "prepare": "git config core.hooksPath .githooks"
   },
