@@ -26,6 +26,23 @@ Auto-save backup app for _Into the Dead: Our Darkest Days_.
    - The **Auto-launch game** option starts the game immediately upon application launch.
    - The **Close app when game exits** option shuts down the manager automatically after game termination.
 
+### Steam Launch Options
+
+1. In Steam, open the game's Properties.
+2. In the Launch Options field, set the command below so the save manager starts when the game starts:
+   - `"C:\Path\To\ITD ODD Save Manager\ITD ODD Save Manager.exe" %command%`
+   - Replace the path with the actual location of the installed executable.
+
+### Steam Cloud Saves
+
+If no existing save is detected in the local folder, disable Steam Cloud for this game and copy the Steam Cloud save files to the local folder before launching the game.
+
+1. Close the game and the save manager.
+2. Check the local save folder at `C:\Users\<YourUserName>\AppData\LocalLow\PikPok\IntoTheDeadOurDarkestDays` (example pattern: `%USERPROFILE%\AppData\LocalLow\PikPok\IntoTheDeadOurDarkestDays`). If the folder has no save files, turn off Steam Cloud for this game in Steam.
+3. Copy the Steam Cloud save files from `C:\Program Files (x86)\Steam\userdata\<SteamID>\2239710\remote` to `C:\Users\<YourUserName>\AppData\LocalLow\PikPok\IntoTheDeadOurDarkestDays`.
+   - Expected file names to copy: `gamesave_0.sav`, `gamesave_0.sav.bak`, `gamesave_1.sav`, `gamesave_1.sav.bak`, `gamesave_2.sav`, `gamesave_2.sav.bak`.
+4. Launch the game once to confirm the save loads locally.
+
 ### Backups & Restore
 
 - **Backups** are created automatically whenever the game saves.
