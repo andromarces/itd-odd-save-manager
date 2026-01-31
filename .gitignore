@@ -19,7 +19,6 @@ dist-ssr
 /src-tauri/target
 
 # Editor directories and files
-copilot-instructions.md
 .vscode
 .idea
 .DS_Store
@@ -28,8 +27,3 @@ copilot-instructions.md
 *.njsproj
 *.sln
 *.sw?
-AGENTS.md
-CLAUDE.md
-GEMINI.md
-.claude
-.gemini

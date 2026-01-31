@@ -1,0 +1,80 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Build Frontend
+        run: npm run build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e732f901968ed9338f38d3bc310b8303f2a368d3
+        with:
+          toolchain: 1.93.0
+          components: rustfmt, clippy
+
+      - name: Build Tauri App
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run tauri build
+
+      - name: Prepare Artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts
+          $version = "${{ github.ref_name }}" -replace 'v',''
+          
+          $installer = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if ($installer) {
+            Copy-Item $installer.FullName -Destination "artifacts/$($installer.Name)"
+          }
+
+          $msi = Get-ChildItem -Path "src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
+          if ($msi) {
+            Copy-Item $msi.FullName -Destination "artifacts/$($msi.Name)"
+          }
+
+          $exe = "src-tauri/target/release/ITD ODD Save Manager.exe"
+          if (Test-Path $exe) {
+            $zipName = "ITD-ODD-Save-Manager_${version}_portable_x64.zip"
+            Compress-Archive -Path $exe -DestinationPath "artifacts/$zipName"
+          }
+
+          Set-Location artifacts
+          $files = Get-ChildItem *
+          foreach ($file in $files) {
+            $hash = Get-FileHash $file.Name -Algorithm SHA256
+            "$($hash.Hash)  $($file.Name)" | Out-File -FilePath SHA256SUMS.txt -Append -Encoding ascii
+          }
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: artifacts/*
+          draft: true
+          prerelease: false
+          body_path: CHANGELOG.md

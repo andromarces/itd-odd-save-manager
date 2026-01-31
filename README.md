@@ -1,6 +1,6 @@
 # ITD ODD Save Manager
 
-Portable auto‑save backup app for _Into the Dead: Our Darkest Days_.
+Portable auto-save backup app for _Into the Dead: Our Darkest Days_.
 
 ## Features
 
@@ -21,29 +21,29 @@ Portable auto‑save backup app for _Into the Dead: Our Darkest Days_.
 
 ### Configuration
 
-1. **Save Path**: The app attempts to auto-detect your save path on Windows. If not found, enter the path manually in the "Active Configuration" section.
+1. **Save Path**: The application attempts to auto-detect the save path on Windows. If not detected, the path is set manually in the "Active Configuration" section.
 2. **Game Settings**:
-   - Check **Auto-launch game** to start the game immediately when opening this manager.
-   - Check **Close app when game exits** to shut down the manager automatically after you finish playing.
+   - The **Auto-launch game** option starts the game immediately upon application launch.
+   - The **Close app when game exits** option shuts down the manager automatically after game termination.
 
 ### Backups & Restore
 
 - **Backups** are created automatically whenever the game saves.
-- To **Restore**, click the "Restore" button next to a backup entry.
-  - _Warning_: Restoring overwrites your current save.
+- **Restoration** is performed by selecting the "Restore" button next to a backup entry.
+  - _Warning_: Restoring overwrites the current save.
 
 ### System Tray
 
 - Closing the window minimizes the app to the System Tray.
-- Right-click the tray icon to access the menu.
-- Use "Quit" from the tray menu to fully exit the application.
+- The tray icon menu provides access to actions.
+- The "Quit" action fully exits the application.
 
 ## Development
 
 ### Prerequisites
 
-- Rust (latest stable)
-- Node.js & npm
+- Rust 1.93.0
+- Node.js 20 (LTS) & npm
 
 ### Setup
 
@@ -53,15 +53,23 @@ Portable auto‑save backup app for _Into the Dead: Our Darkest Days_.
 
 ### Build
 
-- Run `npm run dev` for development.
-- Run `npm run build` to build the frontend only.
-- Run `npx tauri build` to create the production executable and installers.
-- The compiled executable will be located at:
-  - `src-tauri/target/release/app.exe` (Windows)
-  - This file is portable and can be moved and run from anywhere.
-- Installers will be located at:
-  - `src-tauri/target/release/bundle/msi/ITD ODD Save Manager_0.1.0_x64_en-US.msi`
-  - `src-tauri/target/release/bundle/nsis/ITD ODD Save Manager_0.1.0_x64-setup.exe`
+For detailed build instructions and reproducibility steps, please refer to [BUILDING.md](BUILDING.md).
+
+- `npm run dev` starts the development server.
+- `npm run tauri build` creates the production executable and installers.
+
+## Verification
+
+Integrity verification steps:
+1.  The `SHA256SUMS.txt` file is available on the [GitHub Release](https://github.com/andromarces/itd-odd-save-manager/releases).
+2.  The SHA256 hash of the downloaded installer or zip file is calculated.
+3.  The calculated hash is compared with the one in the text file.
+
+## Privacy & Security
+
+*   **Local-First**: All save data and backups are stored locally on the local machine.
+*   **No Telemetry**: This application does not collect or transmit user data.
+*   **Network**: The application is offline-capable.
 
 ## License & Attribution
 
