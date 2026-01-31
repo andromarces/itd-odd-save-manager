@@ -33,10 +33,22 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:GITHUB_WORKSPACE "rust-toolchain.toml"
+          $content = Get-Content -Raw -Path $path
+          if ($content -match 'channel\s*=\s*"([^"]+)"') {
+            "toolchain=$($matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
+          } else {
+            throw "Rust toolchain channel not found in rust-toolchain.toml"
+          }
+
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@e732f901968ed9338f38d3bc310b8303f2a368d3
+        uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: 1.93.0
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
           components: rustfmt, clippy
 
       - name: Check formatting
