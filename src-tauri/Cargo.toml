@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "1.0.0"
 description = "ITD ODD Save Manager"
 authors = ["andromarces"]
 license-file = "../LICENSE.md"

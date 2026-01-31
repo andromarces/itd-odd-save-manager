@@ -58,7 +58,7 @@ sudo apt-get install -y pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libjavascr
 
 To verify that the build matches the official release:
 
-1. Check out the specific tag (e.g., `git checkout v0.1.0`).
+1. Check out the specific tag (e.g., `git checkout v1.0.0`).
 2. Build using the steps above.
 3. Compare the SHA256 hash of `src-tauri/target/release/ITD ODD Save Manager.exe` with the `SHA256SUMS.txt` provided in the GitHub Release.
 
