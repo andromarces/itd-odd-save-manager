@@ -29,7 +29,27 @@ This document outlines how to build the ITD ODD Save Manager from source. The pr
    npm ci
    ```
 
-   _Note: `npm ci` is recommended over `npm install` for reproducible environments as it respects `package-lock.json` strictly._
+   _Note: `npm ci` is recommended over `npm install` for reproducible environments as it respects `package-lock.json` strictly. Running `npm ci` also invokes the `prepare` lifecycle script, which installs the Husky git hooks automatically._
+
+## Git Hooks
+
+Git hooks are managed by [Husky](https://typicode.github.io/husky) and run automatically after `npm ci`.
+
+### pre-commit
+
+Runs [lint-staged](https://github.com/lint-staged/lint-staged) against staged files only:
+
+- **JS/TS files** (`src/**/*.{ts,js}`): formatted with `oxfmt`.
+- **Rust files** (`src-tauri/**/*.rs`): formatted with `rustfmt --edition 2021`.
+
+### pre-push
+
+Runs against files changed between the local branch and its upstream (`@{upstream}...HEAD`):
+
+- **JS/TS files** (`src/**/*.{ts,js}`): linted with `oxlint`.
+- **Rust files**: `cargo clippy -- -D warnings` runs in `src-tauri/` when at least one `.rs` file changed.
+
+When no upstream branch is configured (e.g., on the first push of a new branch), the hook uses `git merge-base HEAD origin/main` (or `origin/master`) as the base, so only the branch's own commits are linted. If neither remote default branch is reachable, pre-push linting is skipped entirely.
 
 3. **Build Frontend**
 

@@ -12,7 +12,11 @@
     "test:coverage": "vitest run --coverage",
     "tauri": "tauri",
     "format": "cd src-tauri && cargo fmt",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,js}": "oxfmt",
+    "src-tauri/**/*.rs": "rustfmt --edition 2021"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1"
@@ -20,7 +24,11 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1",
     "@vitest/coverage-v8": "^4.0.18",
+    "husky": "^9.1.7",
     "jsdom": "^28.1.0",
+    "lint-staged": "^16.3.3",
+    "oxfmt": "^0.37.0",
+    "oxlint": "^1.52.0",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vitest": "^4.0.18"
