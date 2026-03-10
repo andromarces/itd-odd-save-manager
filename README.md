@@ -55,6 +55,10 @@ If no existing save is detected in the local folder, disable Steam Cloud for thi
 - The tray icon menu provides access to actions.
 - The "Quit" action fully exits the application.
 
+## Supported Platforms
+
+Windows only.
+
 ## Development
 
 ### Prerequisites

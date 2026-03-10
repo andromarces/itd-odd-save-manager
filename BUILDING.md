@@ -14,13 +14,6 @@ This document outlines how to build the ITD ODD Save Manager from source. The pr
 
 - **Microsoft Visual Studio C++ Build Tools**: Required for compiling Rust artifacts on Windows.
 
-### Linux (Ubuntu/Debian)
-
-```bash
-sudo apt-get update
-sudo apt-get install -y pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libjavascriptcoregtk-4.1-dev
-```
-
 ## Build Steps
 
 1. **Clone the Repository**
