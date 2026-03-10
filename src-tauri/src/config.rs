@@ -201,7 +201,7 @@ pub(crate) fn restart_watcher_with_limit(
                 if restore_failed {
                     guard.save_path = None;
                 }
-                let _ = save_config_to_path(&*guard, config_path);
+                let _ = save_config_to_path(&guard, config_path);
             }
             Err(e) => log::error!("Failed to acquire lock for rollback config update: {}", e),
         }
@@ -373,11 +373,6 @@ pub async fn set_game_settings(
     }
 
     Ok(())
-}
-
-/// Serializes and writes the configuration to disk.
-pub(crate) fn save_config(config: &AppConfig) -> Result<(), String> {
-    save_config_to_path(config, &get_config_path())
 }
 
 /// Serializes and writes the configuration to a specific path.
