@@ -1,4 +1,10 @@
-import { logActivity, safeInvoke, updateStatus, withBusyButton } from "../ui_utils";
+import {
+  getInvokeErrorMessage,
+  logActivity,
+  safeInvoke,
+  updateStatus,
+  withBusyButton,
+} from "../ui_utils";
 import type { AppElements } from "./dom";
 import type { AppConfig, StatusType } from "./types";
 
@@ -114,7 +120,7 @@ export function createConfigFeature(
   }
 
   /**
-   * Validates and saves the user-provided path.
+   * Saves the user-provided path by delegating validation and normalization to the backend.
    */
   async function savePath(): Promise<void> {
     const path = elements.manualInput.value.trim();
@@ -123,34 +129,16 @@ export function createConfigFeature(
       return;
     }
 
-    await withBusyButton(elements.saveButton, "Validating...", async () => {
-      setStatus("Validating...", "info");
-
-      const isValid = await safeInvoke<boolean>(
-        "validate_path",
-        { path },
-        {
-          actionName: "validate path",
-          onError: () => setStatus("Error validating path.", "error"),
-        },
-      );
-
-      if (isValid === undefined) return;
-
-      if (!isValid) {
-        setStatus("Path does not exist or is invalid.", "error");
-        logActivity(`Invalid path entered: ${path}`);
-        return;
-      }
+    await withBusyButton(elements.saveButton, "Saving...", async () => {
+      setStatus("Saving...", "info");
 
       const normalizedPath = await safeInvoke<string>(
         "set_save_path",
         { path },
         {
           actionName: "save path",
-          onError: () => {
-            setStatus("Error saving path.", "error");
-            void loadConfig();
+          onError: (error) => {
+            setStatus(getInvokeErrorMessage(error) || "Error saving path.", "error");
           },
         },
       );

@@ -123,9 +123,6 @@ describe("config refresh availability", () => {
   it("enables refresh after a successful save path validation", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation((command: string) => {
-      if (command === "validate_path") {
-        return Promise.resolve(true);
-      }
       if (command === "set_save_path") {
         return Promise.resolve("C:\\Saves");
       }
@@ -146,5 +143,49 @@ describe("config refresh availability", () => {
 
     expect(setRefreshAvailability).toHaveBeenLastCalledWith(true);
     expect(elements.manualInput.value).toBe("C:\\Saves");
+  });
+
+  it("preserves the attempted path in the input when set_save_path rejects", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockRejectedValue(
+      "The provided path must exist, or be a new file path within an existing directory.",
+    );
+
+    const { createConfigFeature } = await import("./config");
+    const elements = createElements();
+    elements.manualInput.value = "C:\\Invalid\\Path";
+    const setRefreshAvailability = vi.fn();
+
+    const feature = createConfigFeature(elements, {
+      loadBackups: vi.fn().mockResolvedValue(undefined),
+      setRefreshAvailability,
+    });
+
+    await feature.savePath();
+
+    expect(elements.manualInput.value).toBe("C:\\Invalid\\Path");
+  });
+
+  it("shows the backend error message in the status area when set_save_path rejects", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockRejectedValue(
+      "The provided path must exist, or be a new file path within an existing directory.",
+    );
+
+    const { createConfigFeature } = await import("./config");
+    const elements = createElements();
+    elements.manualInput.value = "C:\\Invalid\\Path";
+
+    const feature = createConfigFeature(elements, {
+      loadBackups: vi.fn().mockResolvedValue(undefined),
+      setRefreshAvailability: vi.fn(),
+    });
+
+    await feature.savePath();
+
+    expect(elements.configStatus.textContent).toBe(
+      "The provided path must exist, or be a new file path within an existing directory.",
+    );
+    expect(elements.configStatus.classList.contains("error")).toBe(true);
   });
 });

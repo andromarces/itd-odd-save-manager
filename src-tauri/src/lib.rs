@@ -112,7 +112,6 @@ pub fn run() {
             config::get_config,
             config::set_save_path,
             config::set_game_settings,
-            config::validate_path,
             commands::get_backups_command,
             commands::restore_backup_command,
             commands::toggle_backup_lock_command,

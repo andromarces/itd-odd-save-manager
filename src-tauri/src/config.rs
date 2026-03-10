@@ -391,16 +391,6 @@ pub(crate) fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<(),
     Ok(())
 }
 
-/// Checks if a path is valid.
-///
-/// Returns true if the path exists OR if the parent directory exists and looks like a file path.
-#[tauri::command(rename_all = "snake_case")]
-pub async fn validate_path(path: String) -> bool {
-    let is_valid = is_valid_path(&path);
-    log::info!("Validating path '{}': {}", path, is_valid);
-    is_valid
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
