@@ -20,6 +20,7 @@ const DEBOUNCE_DURATION: Duration = Duration::from_secs(2);
 pub struct FileWatcher {
     watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
     shutdown: Arc<Mutex<Arc<AtomicBool>>>,
+    thread_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 }
 
 impl FileWatcher {
@@ -28,6 +29,7 @@ impl FileWatcher {
         Self {
             watcher: Arc::new(Mutex::new(None)),
             shutdown: Arc::new(Mutex::new(Arc::new(AtomicBool::new(false)))),
+            thread_handle: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -75,20 +77,30 @@ impl FileWatcher {
             *shutdown_guard = shutdown_token.clone();
         }
 
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             debounce_loop(rx, watch_target, shutdown_token, limit, on_backup);
         });
+
+        match self.thread_handle.lock() {
+            Ok(mut handle_guard) => *handle_guard = Some(handle),
+            Err(e) => error!(
+                "Failed to store thread handle; debounce thread cannot be joined on next stop: {}",
+                e
+            ),
+        }
 
         info!("Started watching: {:?} (limit: {})", path, limit);
         Ok(())
     }
 
-    /// Stops the current watcher, if active.
+    /// Stops the current watcher, if active, and waits for the debounce thread to exit.
+    ///
+    /// Dropping the watcher disconnects the event channel, which causes any
+    /// blocked `recv_timeout` call in the debounce thread to return immediately.
+    /// The join therefore completes promptly unless a backup is mid-flight.
     pub fn stop(&self) {
         match self.shutdown.lock() {
-            Ok(shutdown_guard) => {
-                shutdown_guard.store(true, Ordering::SeqCst);
-            }
+            Ok(shutdown_guard) => shutdown_guard.store(true, Ordering::SeqCst),
             Err(e) => error!("Failed to lock shutdown state during stop: {}", e),
         }
 
@@ -100,6 +112,17 @@ impl FileWatcher {
                 }
             }
             Err(e) => error!("Failed to lock watcher state during stop: {}", e),
+        }
+
+        match self.thread_handle.lock() {
+            Ok(mut handle_guard) => {
+                if let Some(handle) = handle_guard.take() {
+                    if let Err(e) = handle.join() {
+                        error!("Debounce thread panicked during shutdown: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => error!("Failed to lock thread handle during stop: {}", e),
         }
     }
 

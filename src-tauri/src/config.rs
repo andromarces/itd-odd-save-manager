@@ -115,9 +115,13 @@ pub async fn get_config(state: State<'_, ConfigState>) -> Result<AppConfig, Stri
     })
 }
 
-/// Helper to safely update configuration: locks, clones, mutates, saves to disk, then updates memory.
-fn update_config(
-    config_state: &State<'_, ConfigState>,
+/// Locks, clones, mutates, saves to the given path, then updates in-memory state.
+///
+/// Memory is only updated after a successful disk write, so a write failure
+/// leaves both disk and memory at the previous value.
+pub(crate) fn update_config_with_path(
+    config_state: &ConfigState,
+    config_path: &Path,
     mutator: impl FnOnce(&mut AppConfig),
 ) -> Result<(), String> {
     let mut config_guard = config_state.0.lock().map_err(|e| {
@@ -128,9 +132,138 @@ fn update_config(
     let mut new_config = config_guard.clone();
     mutator(&mut new_config);
 
-    save_config(&new_config)?;
+    save_config_to_path(&new_config, config_path)?;
 
     *config_guard = new_config;
+    Ok(())
+}
+
+/// Thin wrapper around `update_config_with_path` using the default config path.
+fn update_config(
+    config_state: &State<'_, ConfigState>,
+    mutator: impl FnOnce(&mut AppConfig),
+) -> Result<(), String> {
+    update_config_with_path(config_state, &get_config_path(), mutator)
+}
+
+/// Restores the previous watcher state after a failed path swap.
+///
+/// If the old path exists, restarts the watcher on it. If that also fails,
+/// stops the watcher and clears `save_path` in both memory and on disk.
+fn rollback_watcher(
+    config_state: &ConfigState,
+    watcher: &FileWatcher,
+    old_save_path: &Option<String>,
+    max_backups: usize,
+    config_path: &Path,
+) {
+    match old_save_path {
+        Some(old_path) => {
+            if let Err(re) = watcher.start(PathBuf::from(old_path), max_backups, None) {
+                log::error!("Failed to restore previous watcher: {}", re);
+                watcher.stop();
+                let _ = update_config_with_path(config_state, config_path, |c| {
+                    c.save_path = None;
+                });
+            }
+            // else: old watcher restored; disk and memory config already hold old path.
+        }
+        None => watcher.stop(),
+    }
+}
+
+/// Restarts the watcher with a new backup limit, rolling back on failure.
+///
+/// On restart failure, attempts to restore the watcher with `old_limit`. Memory is
+/// always updated to match actual watcher state before a best-effort disk sync,
+/// so runtime config remains consistent even when the disk write fails.
+pub(crate) fn restart_watcher_with_limit(
+    config_state: &ConfigState,
+    watcher: &FileWatcher,
+    path: PathBuf,
+    new_limit: usize,
+    old_limit: usize,
+    config_path: &Path,
+) -> Result<(), String> {
+    if let Err(e) = watcher.start(path.clone(), new_limit, None) {
+        log::error!("Failed to restart watcher with new limit: {}", e);
+
+        let restore_failed = watcher.start(path, old_limit, None).is_err();
+        if restore_failed {
+            log::error!("Failed to restore previous watcher after limit change");
+        }
+
+        // Update memory unconditionally so runtime config always reflects actual
+        // watcher state, then attempt disk sync (best-effort).
+        match config_state.0.lock() {
+            Ok(mut guard) => {
+                guard.max_backups_per_game = old_limit;
+                if restore_failed {
+                    guard.save_path = None;
+                }
+                let _ = save_config_to_path(&*guard, config_path);
+            }
+            Err(e) => log::error!("Failed to acquire lock for rollback config update: {}", e),
+        }
+
+        return Err(format!(
+            "Failed to restart watcher with new backup limit. Error: {}",
+            e
+        ));
+    }
+
+    Ok(())
+}
+
+/// Atomically replaces the watched path and persists the new value to `config_path`.
+///
+/// Step 1: starts the new watcher. Step 2: persists the config. If either step
+/// fails, `rollback_watcher` is called to restore the previous watcher state
+/// before returning the error.
+pub(crate) fn replace_watcher_path(
+    config_state: &ConfigState,
+    watcher: &FileWatcher,
+    new_path: PathBuf,
+    new_path_str: String,
+    config_path: &Path,
+) -> Result<(), String> {
+    let (old_save_path, max_backups) = {
+        let guard = config_state.0.lock().map_err(|e| {
+            log::error!("Failed to acquire lock on configuration state: {}", e);
+            "Failed to acquire lock on configuration state".to_string()
+        })?;
+        (guard.save_path.clone(), guard.max_backups_per_game)
+    };
+
+    if let Err(e) = watcher.start(new_path, max_backups, None) {
+        log::error!("Failed to start watcher for new path: {}", e);
+        rollback_watcher(
+            config_state,
+            watcher,
+            &old_save_path,
+            max_backups,
+            config_path,
+        );
+        return Err(format!(
+            "Configuration path accepted, but failed to start monitoring. Error: {}",
+            e
+        ));
+    }
+
+    if let Err(e) = update_config_with_path(config_state, config_path, |config| {
+        config.save_path = Some(new_path_str);
+    }) {
+        log::error!("Failed to persist new save path: {}", e);
+        rollback_watcher(
+            config_state,
+            watcher,
+            &old_save_path,
+            max_backups,
+            config_path,
+        );
+        return Err(e);
+    }
+
     Ok(())
 }
 
@@ -172,26 +305,13 @@ pub async fn set_save_path(
     let final_path_str = final_path.to_string_lossy().to_string();
     log::info!("Normalized save path to: {}", final_path_str);
 
-    // Update Watcher
-    let max_backups = config_state.0.lock().unwrap().max_backups_per_game;
-    if let Err(e) = watcher.start(final_path, max_backups, None) {
-        log::error!("Failed to start watcher: {}", e);
-
-        // Disable auto-backup on failure
-        let _ = update_config(&config_state, |config| {
-            config.save_path = None;
-        });
-
-        return Err(format!(
-            "Configuration path accepted, but failed to start monitoring. Auto-backup has been disabled. Error: {}",
-            e
-        ));
-    }
-
-    // Success -> persist normalized path
-    update_config(&config_state, |config| {
-        config.save_path = Some(final_path_str.clone());
-    })?;
+    replace_watcher_path(
+        &config_state,
+        &watcher,
+        final_path,
+        final_path_str.clone(),
+        &get_config_path(),
+    )?;
 
     Ok(final_path_str)
 }
@@ -218,9 +338,12 @@ pub async fn set_game_settings(
         max_backups_per_game
     );
 
-    let limit_changed = {
+    let (limit_changed, old_limit) = {
         let guard = config_state.0.lock().map_err(|e| e.to_string())?;
-        guard.max_backups_per_game != max_backups_per_game
+        (
+            guard.max_backups_per_game != max_backups_per_game,
+            guard.max_backups_per_game,
+        )
     };
 
     update_config(&config_state, |config| {
@@ -230,12 +353,22 @@ pub async fn set_game_settings(
     })?;
 
     if limit_changed {
-        // Restart watcher with new limit if active
-        let config = config_state.0.lock().map_err(|e| e.to_string())?;
-        if let Some(path) = &config.save_path {
-            if let Err(e) = watcher.start(PathBuf::from(path), max_backups_per_game, None) {
-                log::error!("Failed to restart watcher with new limit: {}", e);
-            }
+        // Extract the watched path while holding the lock, then release it so
+        // watcher operations (which join threads) do not block under the lock.
+        let path_buf = {
+            let config = config_state.0.lock().map_err(|e| e.to_string())?;
+            config.save_path.as_deref().map(PathBuf::from)
+        };
+
+        if let Some(path_buf) = path_buf {
+            restart_watcher_with_limit(
+                &config_state,
+                &watcher,
+                path_buf,
+                max_backups_per_game,
+                old_limit,
+                &get_config_path(),
+            )?;
         }
     }
 
@@ -277,7 +410,15 @@ pub async fn validate_path(path: String) -> bool {
 mod tests {
     use super::*;
     use std::fs::File;
+    use std::sync::Mutex;
     use tempfile::tempdir;
+
+    fn make_config_state(save_path: Option<&str>) -> ConfigState {
+        ConfigState(Mutex::new(AppConfig {
+            save_path: save_path.map(|s| s.to_string()),
+            ..AppConfig::default()
+        }))
+    }
 
     /// Tests that the AppConfig struct serializes to the expected JSON format.
     #[test]
@@ -396,5 +537,167 @@ mod tests {
         let resolved = config_path_for_exe(&exe_path);
 
         assert_eq!(resolved, expected);
+    }
+
+    /// Verifies a successful replace_watcher_path call updates config and starts the watcher.
+    #[test]
+    fn test_replace_watcher_path_success() {
+        let temp = tempdir().unwrap();
+        let save_dir = temp.path().join("saves");
+        fs::create_dir_all(&save_dir).unwrap();
+        let config_path = temp.path().join("config.json");
+
+        let cs = make_config_state(None);
+        let watcher = FileWatcher::new();
+
+        let result = replace_watcher_path(
+            &cs,
+            &watcher,
+            save_dir.clone(),
+            save_dir.to_string_lossy().to_string(),
+            &config_path,
+        );
+
+        assert!(result.is_ok());
+        let persisted = load_config_from_path(&config_path);
+        assert_eq!(
+            persisted.save_path,
+            Some(save_dir.to_string_lossy().to_string())
+        );
+
+        watcher.stop();
+    }
+
+    /// Verifies that replace_watcher_path returns an error and leaves config unchanged
+    /// when the new path does not exist and there was no previous watcher.
+    #[test]
+    fn test_replace_watcher_path_fails_no_prior_path() {
+        let temp = tempdir().unwrap();
+        let config_path = temp.path().join("config.json");
+        let nonexistent = temp.path().join("does_not_exist");
+
+        let cs = make_config_state(None);
+        let watcher = FileWatcher::new();
+
+        let result = replace_watcher_path(
+            &cs,
+            &watcher,
+            nonexistent,
+            "does_not_exist".to_string(),
+            &config_path,
+        );
+
+        assert!(result.is_err());
+        // Config file should not have been written
+        assert!(!config_path.exists());
+        // In-memory save_path should remain None
+        assert!(cs.0.lock().unwrap().save_path.is_none());
+    }
+
+    /// Verifies that restart_watcher_with_limit succeeds and does not modify config
+    /// when the path exists and the new limit is valid.
+    ///
+    /// The helper does not update config on success; that is the caller's
+    /// responsibility (set_game_settings calls update_config before this helper).
+    #[test]
+    fn test_restart_watcher_with_limit_success() {
+        let temp = tempdir().unwrap();
+        let save_dir = temp.path().join("saves");
+        fs::create_dir_all(&save_dir).unwrap();
+        let config_path = temp.path().join("config.json");
+
+        let save_dir_str = save_dir.to_string_lossy().to_string();
+        // Simulate the state after set_game_settings has already persisted new_limit=100.
+        let cs = ConfigState(Mutex::new(AppConfig {
+            save_path: Some(save_dir_str.clone()),
+            max_backups_per_game: 100,
+            ..AppConfig::default()
+        }));
+        let watcher = FileWatcher::new();
+        watcher.start(save_dir.clone(), 50, None).unwrap();
+
+        let result = restart_watcher_with_limit(&cs, &watcher, save_dir, 100, 50, &config_path);
+
+        assert!(result.is_ok());
+        // Helper does not touch config on success.
+        assert_eq!(cs.0.lock().unwrap().max_backups_per_game, 100);
+        watcher.stop();
+    }
+
+    /// Verifies that restart_watcher_with_limit returns Err and rolls back
+    /// max_backups_per_game to old_limit in memory when the start fails.
+    /// Using the same non-existent path for both start and restore means both
+    /// fail, so save_path is also cleared.
+    #[test]
+    fn test_restart_watcher_with_limit_both_fail_clears_save_path() {
+        let temp = tempdir().unwrap();
+        let config_path = temp.path().join("config.json");
+        let nonexistent = temp.path().join("no_such_dir");
+
+        let cs = ConfigState(Mutex::new(AppConfig {
+            save_path: Some(nonexistent.to_string_lossy().to_string()),
+            max_backups_per_game: 100, // new_limit that was already persisted by caller
+            ..AppConfig::default()
+        }));
+        let watcher = FileWatcher::new();
+
+        let result = restart_watcher_with_limit(&cs, &watcher, nonexistent, 100, 50, &config_path);
+
+        assert!(result.is_err());
+        let guard = cs.0.lock().unwrap();
+        // Memory must reflect stopped-watcher state: old_limit, no save_path.
+        assert_eq!(guard.max_backups_per_game, 50);
+        assert!(
+            guard.save_path.is_none(),
+            "save_path must be cleared when watcher is stopped"
+        );
+    }
+
+    /// Verifies that replace_watcher_path restores the previous watcher when the new
+    /// path does not exist, leaving config on-disk and in-memory at the old value.
+    #[test]
+    fn test_replace_watcher_path_rolls_back_to_previous_watcher() {
+        let temp = tempdir().unwrap();
+        let old_save_dir = temp.path().join("old_saves");
+        let nonexistent = temp.path().join("new_saves_missing");
+        fs::create_dir_all(&old_save_dir).unwrap();
+        let config_path = temp.path().join("config.json");
+
+        // Seed the config file with the old path
+        let initial_config = AppConfig {
+            save_path: Some(old_save_dir.to_string_lossy().to_string()),
+            ..AppConfig::default()
+        };
+        save_config_to_path(&initial_config, &config_path).unwrap();
+
+        let cs = make_config_state(Some(&old_save_dir.to_string_lossy()));
+        let watcher = FileWatcher::new();
+        // Start the watcher on the old path so there is a prior active watcher
+        watcher
+            .start(old_save_dir.clone(), 100, None)
+            .expect("initial watcher start failed");
+
+        let result = replace_watcher_path(
+            &cs,
+            &watcher,
+            nonexistent,
+            "new_saves_missing".to_string(),
+            &config_path,
+        );
+
+        assert!(result.is_err());
+        // On-disk config should still hold the old path
+        let persisted = load_config_from_path(&config_path);
+        assert_eq!(
+            persisted.save_path,
+            Some(old_save_dir.to_string_lossy().to_string())
+        );
+        // In-memory config should still hold the old path
+        assert_eq!(
+            cs.0.lock().unwrap().save_path,
+            Some(old_save_dir.to_string_lossy().to_string())
+        );
+
+        watcher.stop();
     }
 }
