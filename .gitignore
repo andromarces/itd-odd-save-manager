@@ -13,6 +13,7 @@ dist-ssr
 *.local
 .env
 .env.*
+.husky/_/
 
 # Rust / Cargo
 /target
