@@ -16,7 +16,7 @@ else
   fi
 fi
 
-# Lint changed JS/TS files since the upstream base.
+# Lint changed JS, TS, JSX/TSX, module variants, and framework files since the upstream base.
 npx lint-staged --config .lintstagedrc.push.json --diff="${base}...HEAD"
 
 # Run cargo clippy in src-tauri only when Rust files changed since the base.

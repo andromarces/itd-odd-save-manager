@@ -46,7 +46,7 @@ Runs [lint-staged](https://github.com/lint-staged/lint-staged) against staged fi
 
 Runs against files changed between the local branch and its upstream (`@{upstream}...HEAD`):
 
-- **JS/TS files** (`src/**/*.{ts,js}`): linted with `oxlint`.
+- **JS/TS/framework files** (`**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx,vue,svelte,astro}`): linted with `oxlint` across the entire repository. Framework files (`.vue`, `.svelte`, `.astro`) are linted through their script blocks.
 - **Rust files**: `cargo clippy -- -D warnings` runs in `src-tauri/` when at least one `.rs` file changed.
 
 When no upstream branch is configured (e.g., on the first push of a new branch), the hook uses `git merge-base HEAD origin/main` (or `origin/master`) as the base, so only the branch's own commits are linted. If neither remote default branch is reachable, pre-push linting is skipped entirely.
