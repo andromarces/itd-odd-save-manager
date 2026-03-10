@@ -1,3 +1,4 @@
+use crate::backup::index::BackupStore;
 use crate::backup::{self, BackupInfo};
 use crate::config::ConfigState;
 use crate::watcher::FileWatcher;
@@ -110,7 +111,22 @@ pub async fn delete_backup_command(
 
     let verified_path = verify_backup_path(&save_path, &path)?;
 
-    run_blocking(move || backup::delete_backup_folder(&verified_path)).await
+    run_blocking(move || {
+        let folder_name = verified_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        backup::delete_backup_folder(&verified_path)?;
+
+        if let Some(mut store) = BackupStore::load_if_exists(&save_path)? {
+            store.index.prune_deleted(&folder_name);
+            store.save()?;
+        }
+
+        Ok(())
+    })
+    .await
 }
 
 /// Tauri command to batch delete backups.

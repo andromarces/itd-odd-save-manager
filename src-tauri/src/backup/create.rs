@@ -189,7 +189,7 @@ pub(crate) fn perform_backup_for_game_internal(
     }
 
     // 4. Enforce limit
-    if let Err(e) = enforce_backup_limit(game_number, limit, backups) {
+    if let Err(e) = enforce_backup_limit(game_number, limit, backups, index) {
         log::error!(
             "Failed to enforce backup limit for game {}: {}",
             game_number,
@@ -229,7 +229,7 @@ pub fn perform_backup_for_game(
         &backups,
     )?;
 
-    store.save();
+    store.save()?;
 
     Ok(result)
 }

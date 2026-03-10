@@ -38,10 +38,7 @@ pub fn restore_backup(backup_folder_path: &Path, target_save_dir: &Path) -> Resu
             backup_folder_path,
             target_save_dir
         );
-        if let Err(e) = update_index_after_restore(backup_folder_path, target_save_dir) {
-            log::warn!("Failed to update backup index after restore: {}", e);
-        }
-        Ok(())
+        update_index_after_restore(backup_folder_path, target_save_dir)
     } else {
         Err("No valid save files found in backup folder to restore".to_string())
     }
@@ -94,6 +91,5 @@ fn update_index_after_restore(
             last_backup_path: folder_name.to_string(),
         },
     );
-    store.save();
-    Ok(())
+    store.save()
 }

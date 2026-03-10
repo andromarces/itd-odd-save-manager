@@ -1,4 +1,5 @@
 use super::data::BackupInfo;
+use super::index::{BackupIndex, BackupStore};
 use super::listing::get_backups;
 use std::collections::HashMap;
 use std::fs;
@@ -30,6 +31,7 @@ pub fn delete_backups_batch(
 ) -> Result<usize, String> {
     let mut backups = get_backups(save_dir, false, None)?;
     let mut deleted_count = 0;
+    let mut store_opt = BackupStore::load_if_exists(save_dir)?;
 
     // Group backups by game number
     // backups are already sorted by modified desc (newest first)
@@ -64,20 +66,28 @@ pub fn delete_backups_batch(
                 if let Err(e) = delete_backup_folder(&path) {
                     log::error!("Failed to delete backup {:?}: {}", path, e);
                 } else {
+                    if let Some(ref mut store) = store_opt {
+                        store.index.prune_deleted(&backup.filename);
+                    }
                     deleted_count += 1;
                 }
             }
         }
     }
 
+    if let Some(ref store) = store_opt {
+        store.save()?;
+    }
+
     Ok(deleted_count)
 }
 
-/// Enforces the backup limit for a specific game.
+/// Enforces the backup limit for a specific game, pruning the index for any deleted backups.
 pub(crate) fn enforce_backup_limit(
     game_number: u32,
     limit: usize,
     all_backups: &[BackupInfo],
+    index: &mut BackupIndex,
 ) -> Result<(), String> {
     // 0 means no limit
     if limit == 0 {
@@ -106,6 +116,7 @@ pub(crate) fn enforce_backup_limit(
                 let path = PathBuf::from(&backup.path);
                 if path.exists() {
                     fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+                    index.prune_deleted(&backup.filename);
                 }
             }
         }

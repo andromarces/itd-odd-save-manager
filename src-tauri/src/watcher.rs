@@ -174,7 +174,9 @@ fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: us
                 Err(e) => error!("Backup failed for game {}: {}", game_number, e),
             }
         }
-        save_index(&backup_root, &index);
+        if let Err(e) = save_index(&backup_root, &index) {
+            error!("Failed to persist backup index: {}", e);
+        }
     }
     backups_created
 }

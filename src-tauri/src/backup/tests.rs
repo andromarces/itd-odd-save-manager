@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::backup::cleanup::delete_backups_batch;
-    use crate::backup::common::BACKUP_DIR_NAME;
+    use crate::backup::common::{BACKUP_DIR_NAME, INDEX_FILE_NAME};
     use crate::backup::create::perform_backup_for_game;
     use crate::backup::data::{build_save_paths, BackupInfo};
     use crate::backup::index::BackupStore;
@@ -412,6 +412,151 @@ mod tests {
         assert!(!store3.index.notes.contains_key(&folder_name));
     }
 
+    /// Tests that prune_deleted removes notes and game entries for the given folder.
+    #[test]
+    fn test_prune_deleted_removes_index_entries() {
+        use crate::backup::index::{BackupIndex, IndexEntry};
+
+        let folder = "Game 1 - 2024-01-01 12-00-00";
+        let other_folder = "Game 2 - 2024-01-01 12-00-00";
+
+        let mut index = BackupIndex::default();
+        index.notes.insert(folder.to_string(), "a note".to_string());
+        index.games.insert(
+            1,
+            IndexEntry {
+                last_hash: "abc".to_string(),
+                last_source_size: 100,
+                last_source_modified: 1000,
+                last_backup_path: folder.to_string(),
+            },
+        );
+        index
+            .notes
+            .insert(other_folder.to_string(), "other note".to_string());
+        index.games.insert(
+            2,
+            IndexEntry {
+                last_hash: "def".to_string(),
+                last_source_size: 200,
+                last_source_modified: 2000,
+                last_backup_path: other_folder.to_string(),
+            },
+        );
+
+        index.prune_deleted(folder);
+
+        assert!(
+            !index.notes.contains_key(folder),
+            "note for deleted folder should be removed"
+        );
+        assert!(
+            !index.games.contains_key(&1),
+            "game entry pointing to deleted folder should be removed"
+        );
+        assert!(
+            index.notes.contains_key(other_folder),
+            "note for unrelated folder should remain"
+        );
+        assert!(
+            index.games.contains_key(&2),
+            "game entry for unrelated folder should remain"
+        );
+    }
+
+    /// Tests that batch deletion prunes notes and game entries from the index.
+    #[test]
+    fn test_batch_delete_prunes_index() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 1;
+        let main_sav = save_dir.join("gamesave_1.sav");
+
+        let mut create_backup = |content: &str| -> String {
+            {
+                let mut f = File::create(&main_sav).unwrap();
+                writeln!(f, "{}", content).unwrap();
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let path = perform_backup_for_game(save_dir, game_number, 100)
+                .unwrap()
+                .unwrap();
+            path.file_name().unwrap().to_string_lossy().to_string()
+        };
+
+        let folder_v1 = create_backup("v1"); // oldest — will be deleted
+        let folder_v2 = create_backup("v2"); // newest — will be kept
+
+        set_backup_note(save_dir, &folder_v1, Some("note v1".to_string())).unwrap();
+        set_backup_note(save_dir, &folder_v2, Some("note v2".to_string())).unwrap();
+
+        // Delete all but the latest (removes v1)
+        delete_backups_batch(save_dir, &[game_number], true, false).unwrap();
+
+        let store = BackupStore::new(save_dir).unwrap();
+        assert!(
+            !store.index.notes.contains_key(&folder_v1),
+            "note for deleted backup should be pruned from index"
+        );
+        assert!(
+            store.index.notes.contains_key(&folder_v2),
+            "note for retained backup should remain in index"
+        );
+    }
+
+    /// Tests that enforce_backup_limit prunes the index entry for the evicted backup.
+    #[test]
+    fn test_backup_limit_prunes_index() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 1;
+        let main_sav = save_dir.join("gamesave_1.sav");
+        let limit = 2;
+
+        // Create first backup and annotate it
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "v1").unwrap();
+        }
+        let backup1 = perform_backup_for_game(save_dir, game_number, limit)
+            .unwrap()
+            .unwrap();
+        let folder1 = backup1.file_name().unwrap().to_string_lossy().to_string();
+        set_backup_note(save_dir, &folder1, Some("old note".to_string())).unwrap();
+
+        // Create second backup (within limit, no eviction)
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "v2").unwrap();
+        }
+        perform_backup_for_game(save_dir, game_number, limit).unwrap();
+
+        // Create third backup — limit=2 evicts v1 to make room
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "v3").unwrap();
+        }
+        perform_backup_for_game(save_dir, game_number, limit).unwrap();
+
+        assert!(!backup1.exists(), "evicted backup folder should be deleted");
+
+        let store = BackupStore::new(save_dir).unwrap();
+        assert!(
+            !store.index.notes.contains_key(&folder1),
+            "note for limit-evicted backup should be pruned from index"
+        );
+        assert!(
+            !store
+                .index
+                .games
+                .values()
+                .any(|e| e.last_backup_path == folder1),
+            "no game entry should reference the evicted backup folder"
+        );
+    }
+
     /// Tests batch deletion logic.
     #[test]
     fn test_batch_delete() {
@@ -458,5 +603,136 @@ mod tests {
 
         let final_backups = get_backups(save_dir, true, None).unwrap();
         assert!(final_backups.is_empty());
+    }
+
+    /// Tests that a backup creation returns an error when the index file cannot be written.
+    ///
+    /// Uses OS-level read-only enforcement. On Unix this is ineffective when the process
+    /// runs as root, so the test is skipped on that platform to avoid a false green.
+    #[test]
+    #[cfg_attr(
+        unix,
+        ignore = "set_readonly is not enforced for root processes on Unix"
+    )]
+    fn test_persist_failure_propagates_from_backup() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 1;
+        let main_sav = save_dir.join("gamesave_1.sav");
+        let index_path = save_dir.join(BACKUP_DIR_NAME).join(INDEX_FILE_NAME);
+
+        // Establish the index file with an initial backup.
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "v1").unwrap();
+        }
+        perform_backup_for_game(save_dir, game_number, 100).unwrap();
+        assert!(index_path.exists());
+
+        // Make the index unwritable.
+        let mut perms = fs::metadata(&index_path).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&index_path, perms.clone()).unwrap();
+
+        // Produce a non-duplicate save to force a new backup attempt.
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "v2").unwrap();
+        }
+        let result = perform_backup_for_game(save_dir, game_number, 100);
+
+        // Restore write permission before asserting so the temp dir cleans up.
+        perms.set_readonly(false);
+        fs::set_permissions(&index_path, perms).unwrap();
+
+        assert!(
+            result.is_err(),
+            "backup should return Err when index cannot be written"
+        );
+    }
+
+    /// Tests that batch deletion returns an error when the index file cannot be written.
+    ///
+    /// Uses OS-level read-only enforcement. On Unix this is ineffective when the process
+    /// runs as root, so the test is skipped on that platform to avoid a false green.
+    #[test]
+    #[cfg_attr(
+        unix,
+        ignore = "set_readonly is not enforced for root processes on Unix"
+    )]
+    fn test_persist_failure_propagates_from_batch_delete() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 1;
+        let main_sav = save_dir.join("gamesave_1.sav");
+        let index_path = save_dir.join(BACKUP_DIR_NAME).join(INDEX_FILE_NAME);
+
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "v1").unwrap();
+        }
+        perform_backup_for_game(save_dir, game_number, 100).unwrap();
+        assert!(index_path.exists());
+
+        let mut perms = fs::metadata(&index_path).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&index_path, perms.clone()).unwrap();
+
+        let result = delete_backups_batch(save_dir, &[game_number], false, true);
+
+        perms.set_readonly(false);
+        fs::set_permissions(&index_path, perms).unwrap();
+
+        assert!(
+            result.is_err(),
+            "batch delete should return Err when index cannot be written"
+        );
+    }
+
+    /// Tests that restore returns an error when the index file cannot be written.
+    ///
+    /// Uses OS-level read-only enforcement. On Unix this is ineffective when the process
+    /// runs as root, so the test is skipped on that platform to avoid a false green.
+    #[test]
+    #[cfg_attr(
+        unix,
+        ignore = "set_readonly is not enforced for root processes on Unix"
+    )]
+    fn test_persist_failure_propagates_from_restore() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        let game_number = 2;
+        let main_sav = save_dir.join("gamesave_2.sav");
+        let index_path = save_dir.join(BACKUP_DIR_NAME).join(INDEX_FILE_NAME);
+
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "original").unwrap();
+        }
+        let backup_folder = perform_backup_for_game(save_dir, game_number, 100)
+            .unwrap()
+            .unwrap();
+        assert!(index_path.exists());
+
+        // Modify the save so the restore has content to copy back.
+        {
+            let mut f = File::create(&main_sav).unwrap();
+            writeln!(f, "corrupted").unwrap();
+        }
+
+        let mut perms = fs::metadata(&index_path).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&index_path, perms.clone()).unwrap();
+
+        let result = restore_backup(&backup_folder, save_dir);
+
+        perms.set_readonly(false);
+        fs::set_permissions(&index_path, perms).unwrap();
+
+        assert!(
+            result.is_err(),
+            "restore should return Err when index cannot be written"
+        );
     }
 }

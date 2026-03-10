@@ -11,6 +11,15 @@ pub(crate) struct BackupIndex {
     pub(crate) notes: HashMap<String, String>,
 }
 
+impl BackupIndex {
+    /// Removes all index entries associated with a deleted backup folder.
+    pub(crate) fn prune_deleted(&mut self, folder_name: &str) {
+        self.notes.remove(folder_name);
+        self.games
+            .retain(|_, entry| entry.last_backup_path != folder_name);
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct IndexEntry {
     pub(crate) last_hash: String,
@@ -54,8 +63,8 @@ impl BackupStore {
     }
 
     /// Saves the current index to the backup directory.
-    pub(crate) fn save(&self) {
-        save_index(&self.root, &self.index);
+    pub(crate) fn save(&self) -> Result<(), String> {
+        save_index(&self.root, &self.index)
     }
 }
 
@@ -74,9 +83,8 @@ pub(crate) fn load_index(backup_root: &Path) -> BackupIndex {
 }
 
 /// Saves the given index to the backup root directory.
-pub(crate) fn save_index(backup_root: &Path, index: &BackupIndex) {
+pub(crate) fn save_index(backup_root: &Path, index: &BackupIndex) -> Result<(), String> {
     let index_path = backup_root.join(INDEX_FILE_NAME);
-    if let Ok(content) = serde_json::to_string(index) {
-        let _ = fs::write(index_path, content);
-    }
+    let content = serde_json::to_string(index).map_err(|e| e.to_string())?;
+    fs::write(index_path, content).map_err(|e| e.to_string())
 }

@@ -44,6 +44,5 @@ pub fn set_backup_note(
         store.index.notes.remove(folder_name);
     }
 
-    store.save();
-    Ok(())
+    store.save()
 }
