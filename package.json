@@ -18,7 +18,7 @@
     "@tauri-apps/api": "^2.10.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.9.6",
+    "@tauri-apps/cli": "^2.10.1",
     "@vitest/coverage-v8": "^4.0.18",
     "jsdom": "^27.4.0",
     "typescript": "~5.9.3",
