@@ -29,7 +29,7 @@ export interface ConfigFeature {
 }
 
 export interface ConfigDependencies {
-  loadBackups: () => Promise<void>;
+  loadBackups: (force?: boolean) => Promise<void>;
   setRefreshAvailability: (isEnabled: boolean) => void;
 }
 
@@ -149,7 +149,7 @@ export function createConfigFeature(
       setValidPath(normalizedPath);
       setStatus("Save path updated successfully.", "success");
       logActivity(`Save path updated: ${normalizedPath}`);
-      void deps.loadBackups();
+      void deps.loadBackups(true);
     });
   }
 

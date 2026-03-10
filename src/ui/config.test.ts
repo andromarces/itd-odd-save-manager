@@ -145,6 +145,30 @@ describe("config refresh availability", () => {
     expect(elements.manualInput.value).toBe("C:\\Saves");
   });
 
+  it("calls loadBackups with force=true after a successful path save", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation((command: string) => {
+      if (command === "set_save_path") {
+        return Promise.resolve("C:\\Saves");
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const { createConfigFeature } = await import("./config");
+    const elements = createElements();
+    elements.manualInput.value = "C:\\Saves";
+    const loadBackups = vi.fn().mockResolvedValue(undefined);
+
+    const feature = createConfigFeature(elements, {
+      loadBackups,
+      setRefreshAvailability: vi.fn(),
+    });
+
+    await feature.savePath();
+
+    expect(loadBackups).toHaveBeenCalledWith(true);
+  });
+
   it("preserves the attempted path in the input when set_save_path rejects", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockRejectedValue(

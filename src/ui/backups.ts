@@ -1,4 +1,4 @@
-import { invokeAction, logActivity, withBusyButton } from "../ui_utils";
+import { invokeAction, logActivity } from "../ui_utils";
 import { listen } from "@tauri-apps/api/event";
 import type { AppElements } from "./dom";
 import type { BackupInfo } from "./types";
@@ -30,7 +30,7 @@ type BackupsElements = Pick<
 >;
 
 export interface BackupsFeature {
-  loadBackups: () => Promise<void>;
+  loadBackups: (force?: boolean) => Promise<void>;
   setRefreshAvailability: (isEnabled: boolean) => void;
   destroy: () => void;
 }
@@ -41,6 +41,12 @@ export interface BackupsFeature {
 export function createBackupsFeature(elements: BackupsElements): BackupsFeature {
   let currentBackups: BackupInfo[] = [];
   let currentBackupsMap = new Map<string, BackupInfo>();
+  let loadInFlight: Promise<void> | null = null;
+  let loadGeneration = 0;
+  let pendingRefresh = false;
+  let activeLoadCount = 0;
+  let capturedButtonText: string | null = null;
+  let buttonShouldBeEnabled = !elements.refreshBackupsButton.disabled;
 
   const masterDelete = new MasterDeleteController(elements, () => loadBackups());
 
@@ -79,38 +85,111 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
   }
 
   /**
-   * Loads backups from the backend and updates the table.
+   * Disables the refresh button when the first concurrent load begins.
+   * Captures the pre-load text only once so overlapping loads share it.
+   * The disabled state is not snapshotted here; releaseRefreshButton uses
+   * buttonShouldBeEnabled, which setRefreshAvailability keeps current throughout.
    */
-  async function loadBackups(): Promise<void> {
-    if (!elements.manualInput.value) return;
+  function acquireRefreshButton(): void {
+    if (activeLoadCount === 0) {
+      capturedButtonText = elements.refreshBackupsButton.textContent;
+      elements.refreshBackupsButton.disabled = true;
+      elements.refreshBackupsButton.textContent = "Refreshing...";
+    }
+    activeLoadCount++;
+  }
 
-    await withBusyButton(elements.refreshBackupsButton, "Refreshing...", async () => {
+  /**
+   * Re-enables the refresh button only after all concurrent loads have finished,
+   * applying the current buttonShouldBeEnabled value rather than a pre-load snapshot.
+   */
+  function releaseRefreshButton(): void {
+    activeLoadCount = Math.max(0, activeLoadCount - 1);
+    if (activeLoadCount === 0) {
+      elements.refreshBackupsButton.disabled = !buttonShouldBeEnabled;
+      elements.refreshBackupsButton.textContent = capturedButtonText;
+    }
+  }
+
+  /**
+   * Loads backups from the backend and updates the table.
+   *
+   * When force is true (e.g. after a path change), any in-flight request is
+   * invalidated via the generation counter and abandoned so a fresh request
+   * starts immediately. When force is false and a load is already in flight,
+   * the call joins the existing promise and sets pendingRefresh so a follow-up
+   * fetch is scheduled once the current load completes.
+   *
+   * The closed-over promise reference in .finally() ensures only the currently
+   * active load clears shared state, preventing an abandoned request's cleanup
+   * from clobbering a newer in-flight promise.
+   *
+   * The follow-up loadBackups() call in .finally() runs before releaseRefreshButton()
+   * so its acquireRefreshButton() increments the count before the release decrements
+   * it, keeping the button in the busy state for the full duration.
+   */
+  function loadBackups(force = false): Promise<void> {
+    if (!elements.manualInput.value) return Promise.resolve();
+
+    if (force) {
+      loadGeneration++; // Invalidate any in-flight result
+      loadInFlight = null; // Abandon deduplication so a fresh request starts
+      pendingRefresh = false; // Force supersedes any queued follow-up
+    }
+
+    if (loadInFlight) {
+      pendingRefresh = true; // Schedule a follow-up once the current load settles
+      return loadInFlight;
+    }
+
+    const generation = ++loadGeneration;
+    acquireRefreshButton();
+
+    const promise: Promise<void> = (async () => {
       const backups = await invokeAction<BackupInfo[]>(
         "get_backups_command",
         undefined,
         "load backups",
         {
           onError: () => {
+            if (generation !== loadGeneration) return;
             elements.backupsList.innerHTML =
               '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
           },
         },
       );
 
-      if (backups) {
+      if (backups && generation === loadGeneration) {
         currentBackups = backups;
         currentBackupsMap = new Map(backups.map((b) => [b.path, b]));
         renderBackups(backups);
         logActivity(`Loaded ${backups.length} backups.`);
       }
+    })().finally(() => {
+      if (loadInFlight === promise) {
+        loadInFlight = null;
+        if (pendingRefresh) {
+          pendingRefresh = false;
+          void loadBackups(); // acquireRefreshButton() runs before releaseRefreshButton() below
+        }
+      }
+      releaseRefreshButton();
     });
+
+    loadInFlight = promise;
+    return promise;
   }
 
   /**
    * Updates whether the refresh button is enabled for a valid save path.
+   * Defers the DOM update when a load is active so the busy state is not
+   * overridden; the value is applied by releaseRefreshButton on completion.
    */
   function setRefreshAvailability(isEnabled: boolean): void {
-    elements.refreshBackupsButton.disabled = !isEnabled;
+    buttonShouldBeEnabled = isEnabled;
+    if (activeLoadCount === 0) {
+      elements.refreshBackupsButton.disabled = !isEnabled;
+    }
   }
 
   /**
