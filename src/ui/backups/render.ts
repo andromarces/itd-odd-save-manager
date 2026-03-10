@@ -1,6 +1,6 @@
-import { formatDate } from '../../ui_utils';
+import { formatDate } from "../../ui_utils";
 export { formatDate };
-import type { BackupInfo } from '../types';
+import type { BackupInfo } from "../types";
 
 /**
  * Returns the display label for a backup entry.
@@ -23,43 +23,35 @@ export function buildRestoreConfirmationMessage(backup: BackupInfo): string {
  * Creates a table row for a backup.
  */
 export function createBackupRow(backup: BackupInfo): HTMLTableRowElement {
-  const row = document.createElement('tr');
+  const row = document.createElement("tr");
   row.dataset.backupId = backup.path;
 
-  const fileCell = document.createElement('td');
+  const fileCell = document.createElement("td");
   fileCell.textContent = getBackupDisplayName(backup);
   fileCell.title = backup.filename;
   if (backup.locked) {
-    fileCell.textContent += ' (Locked)';
+    fileCell.textContent += " (Locked)";
   }
 
-  const dateCell = document.createElement('td');
+  const dateCell = document.createElement("td");
   dateCell.textContent = formatDate(backup.modified);
 
-  const actionCell = document.createElement('td');
-  actionCell.appendChild(createActionButton('Restore', backup.path, 'restore'));
+  const actionCell = document.createElement("td");
+  actionCell.appendChild(createActionButton("Restore", backup.path, "restore"));
   actionCell.appendChild(
-    createActionButton(
-      'Lock',
-      backup.path,
-      'lock',
-      backup.locked ? 'Unlock' : 'Lock',
-      'secondary',
-    ),
+    createActionButton("Lock", backup.path, "lock", backup.locked ? "Unlock" : "Lock", "secondary"),
   );
   actionCell.appendChild(
     createActionButton(
-      'Note',
+      "Note",
       backup.path,
-      'note',
-      'Note',
-      'secondary',
-      backup.note ? 'Edit Note' : 'Add Note',
+      "note",
+      "Note",
+      "secondary",
+      backup.note ? "Edit Note" : "Add Note",
     ),
   );
-  actionCell.appendChild(
-    createActionButton('Delete', backup.path, 'delete', 'Delete', 'danger'),
-  );
+  actionCell.appendChild(createActionButton("Delete", backup.path, "delete", "Delete", "danger"));
 
   row.appendChild(fileCell);
   row.appendChild(dateCell);
@@ -72,9 +64,9 @@ export function createBackupRow(backup: BackupInfo): HTMLTableRowElement {
  * Creates a visible note row for a backup.
  */
 export function createNoteRow(note: string): HTMLTableRowElement {
-  const noteRow = document.createElement('tr');
-  noteRow.className = 'note-row expanded';
-  const noteCell = document.createElement('td');
+  const noteRow = document.createElement("tr");
+  noteRow.className = "note-row expanded";
+  const noteCell = document.createElement("td");
   noteCell.colSpan = 3;
   noteCell.textContent = note;
   noteCell.title = note;
@@ -93,14 +85,13 @@ function createActionButton(
   className?: string,
   title?: string,
 ): HTMLButtonElement {
-  const btn = document.createElement('button');
+  const btn = document.createElement("button");
   btn.textContent = displayLabel || label;
-  const baseClassName = `small ${className || ''}`.trim();
-  btn.className =
-    action === 'lock' ? `${baseClassName} lock-toggle`.trim() : baseClassName;
+  const baseClassName = `small ${className || ""}`.trim();
+  btn.className = action === "lock" ? `${baseClassName} lock-toggle`.trim() : baseClassName;
   btn.dataset.backupId = id;
   btn.dataset.action = action;
   if (title) btn.title = title;
-  if (action !== 'restore') btn.style.marginLeft = '8px';
+  if (action !== "restore") btn.style.marginLeft = "8px";
   return btn;
 }

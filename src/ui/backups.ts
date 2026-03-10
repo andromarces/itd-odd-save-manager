@@ -1,32 +1,32 @@
-import { invokeAction, logActivity, withBusyButton } from '../ui_utils';
-import { listen } from '@tauri-apps/api/event';
-import type { AppElements } from './dom';
-import type { BackupInfo } from './types';
+import { invokeAction, logActivity, withBusyButton } from "../ui_utils";
+import { listen } from "@tauri-apps/api/event";
+import type { AppElements } from "./dom";
+import type { BackupInfo } from "./types";
 import {
   createBackupRow,
   createNoteRow,
   getBackupDisplayName,
   formatDate,
   buildRestoreConfirmationMessage,
-} from './backups/render';
-import { MasterDeleteController } from './backups/dialog';
+} from "./backups/render";
+import { MasterDeleteController } from "./backups/dialog";
 
 export { getBackupDisplayName, buildRestoreConfirmationMessage };
 
 type BackupsElements = Pick<
   AppElements,
-  | 'manualInput'
-  | 'refreshBackupsButton'
-  | 'backupsTable'
-  | 'backupsList'
-  | 'masterDeleteButton'
-  | 'masterDeleteDialog'
-  | 'masterDeleteForm'
-  | 'masterDeleteGameList'
-  | 'masterDeleteModeRadios'
-  | 'masterDeleteLockedRadios'
-  | 'masterDeleteCancelBtn'
-  | 'masterDeleteConfirmBtn'
+  | "manualInput"
+  | "refreshBackupsButton"
+  | "backupsTable"
+  | "backupsList"
+  | "masterDeleteButton"
+  | "masterDeleteDialog"
+  | "masterDeleteForm"
+  | "masterDeleteGameList"
+  | "masterDeleteModeRadios"
+  | "masterDeleteLockedRadios"
+  | "masterDeleteCancelBtn"
+  | "masterDeleteConfirmBtn"
 >;
 
 export interface BackupsFeature {
@@ -38,17 +38,13 @@ export interface BackupsFeature {
 /**
  * Creates the backups feature, wiring the UI and returning feature actions.
  */
-export function createBackupsFeature(
-  elements: BackupsElements,
-): BackupsFeature {
+export function createBackupsFeature(elements: BackupsElements): BackupsFeature {
   let currentBackups: BackupInfo[] = [];
   let currentBackupsMap = new Map<string, BackupInfo>();
 
-  const masterDelete = new MasterDeleteController(elements, () =>
-    loadBackups(),
-  );
+  const masterDelete = new MasterDeleteController(elements, () => loadBackups());
 
-  const unlistenPromise = listen('backups-updated', () => {
+  const unlistenPromise = listen("backups-updated", () => {
     void loadBackups();
   });
 
@@ -88,30 +84,26 @@ export function createBackupsFeature(
   async function loadBackups(): Promise<void> {
     if (!elements.manualInput.value) return;
 
-    await withBusyButton(
-      elements.refreshBackupsButton,
-      'Refreshing...',
-      async () => {
-        const backups = await invokeAction<BackupInfo[]>(
-          'get_backups_command',
-          undefined,
-          'load backups',
-          {
-            onError: () => {
-              elements.backupsList.innerHTML =
-                '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
-            },
+    await withBusyButton(elements.refreshBackupsButton, "Refreshing...", async () => {
+      const backups = await invokeAction<BackupInfo[]>(
+        "get_backups_command",
+        undefined,
+        "load backups",
+        {
+          onError: () => {
+            elements.backupsList.innerHTML =
+              '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
           },
-        );
+        },
+      );
 
-        if (backups) {
-          currentBackups = backups;
-          currentBackupsMap = new Map(backups.map((b) => [b.path, b]));
-          renderBackups(backups);
-          logActivity(`Loaded ${backups.length} backups.`);
-        }
-      },
-    );
+      if (backups) {
+        currentBackups = backups;
+        currentBackupsMap = new Map(backups.map((b) => [b.path, b]));
+        renderBackups(backups);
+        logActivity(`Loaded ${backups.length} backups.`);
+      }
+    });
   }
 
   /**
@@ -126,15 +118,14 @@ export function createBackupsFeature(
    */
   async function toggleBackupLock(backup: BackupInfo): Promise<void> {
     const success = await invokeAction(
-      'toggle_backup_lock_command',
+      "toggle_backup_lock_command",
       {
         backup_path: backup.path,
         locked: !backup.locked,
       },
-      'toggle backup lock',
+      "toggle backup lock",
       {
-        onError: () =>
-          logActivity(`Failed to toggle lock for ${backup.filename}`),
+        onError: () => logActivity(`Failed to toggle lock for ${backup.filename}`),
       },
     );
 
@@ -158,17 +149,17 @@ export function createBackupsFeature(
    * Edits the note for a backup.
    */
   async function editBackupNote(backup: BackupInfo): Promise<void> {
-    const currentNote = backup.note || '';
-    const newNote = window.prompt('Enter note for this backup:', currentNote);
+    const currentNote = backup.note || "";
+    const newNote = window.prompt("Enter note for this backup:", currentNote);
     if (newNote === null) return;
 
     const success = await invokeAction(
-      'set_backup_note_command',
+      "set_backup_note_command",
       {
         backup_filename: backup.filename,
         note: newNote.trim() || null,
       },
-      'set backup note',
+      "set backup note",
       {
         onError: () => logActivity(`Failed to set note for ${backup.filename}`),
       },
@@ -183,14 +174,14 @@ export function createBackupsFeature(
         elements.backupsList.replaceChild(newRow, row);
 
         const nextSibling = newRow.nextElementSibling;
-        const hasNoteRow = nextSibling?.classList.contains('note-row');
+        const hasNoteRow = nextSibling?.classList.contains("note-row");
 
         if (backup.note) {
           const newNoteRow = createNoteRow(backup.note);
           if (hasNoteRow && nextSibling) {
             elements.backupsList.replaceChild(newNoteRow, nextSibling);
           } else {
-            newRow.insertAdjacentElement('afterend', newNoteRow);
+            newRow.insertAdjacentElement("afterend", newNoteRow);
           }
         } else if (hasNoteRow && nextSibling) {
           elements.backupsList.removeChild(nextSibling);
@@ -213,11 +204,11 @@ export function createBackupsFeature(
     if (!confirmed) return;
 
     const success = await invokeAction(
-      'delete_backup_command',
+      "delete_backup_command",
       {
         backup_path: backup.path,
       },
-      'delete backup',
+      "delete backup",
       {
         successLog: `Deleted backup: ${backup.filename}`,
         onError: () => logActivity(`Failed to delete ${backup.filename}`),
@@ -243,7 +234,7 @@ export function createBackupsFeature(
             row.remove();
             // Also remove associated note row if present
             const nextSibling = row.nextElementSibling;
-            if (nextSibling?.classList.contains('note-row')) {
+            if (nextSibling?.classList.contains("note-row")) {
               nextSibling.remove();
             }
           }
@@ -261,15 +252,15 @@ export function createBackupsFeature(
     if (!confirmed) return;
 
     await invokeAction(
-      'restore_backup_command',
+      "restore_backup_command",
       {
         backup_path: backup.path,
         target_path: backup.original_path,
       },
-      'restore backup',
+      "restore backup",
       {
         successLog: `Restored backup: ${backup.filename}`,
-        successAlert: 'Restore successful!',
+        successAlert: "Restore successful!",
         alertOnError: true,
       },
     );
@@ -280,7 +271,7 @@ export function createBackupsFeature(
    */
   function handleBackupsTableClick(event: Event): void {
     const target = event.target as HTMLElement;
-    const button = target.closest('button');
+    const button = target.closest("button");
 
     if (button && button.dataset.backupId) {
       const id = button.dataset.backupId;
@@ -288,21 +279,21 @@ export function createBackupsFeature(
 
       if (backup) {
         const action = button.dataset.action;
-        if (action === 'restore') {
+        if (action === "restore") {
           void restoreBackup(backup);
-        } else if (action === 'lock') {
+        } else if (action === "lock") {
           void toggleBackupLock(backup);
-        } else if (action === 'note') {
+        } else if (action === "note") {
           void editBackupNote(backup);
-        } else if (action === 'delete') {
+        } else if (action === "delete") {
           void deleteBackup(backup);
         }
       }
       return;
     }
 
-    const row = target.closest('tr');
-    if (row && row.classList.contains('note-row')) {
+    const row = target.closest("tr");
+    if (row && row.classList.contains("note-row")) {
       return;
     }
   }
@@ -310,9 +301,9 @@ export function createBackupsFeature(
   const onMasterDeleteClick = () => masterDelete.open(currentBackups);
   const onRefreshClick = () => void loadBackups();
 
-  elements.backupsTable.addEventListener('click', handleBackupsTableClick);
-  elements.masterDeleteButton.addEventListener('click', onMasterDeleteClick);
-  elements.refreshBackupsButton.addEventListener('click', onRefreshClick);
+  elements.backupsTable.addEventListener("click", handleBackupsTableClick);
+  elements.masterDeleteButton.addEventListener("click", onMasterDeleteClick);
+  elements.refreshBackupsButton.addEventListener("click", onRefreshClick);
 
   return {
     loadBackups,
@@ -320,18 +311,9 @@ export function createBackupsFeature(
     destroy: () => {
       void unlistenPromise.then((unlisten) => unlisten());
       masterDelete.destroy();
-      elements.backupsTable.removeEventListener(
-        'click',
-        handleBackupsTableClick,
-      );
-      elements.masterDeleteButton.removeEventListener(
-        'click',
-        onMasterDeleteClick,
-      );
-      elements.refreshBackupsButton.removeEventListener(
-        'click',
-        onRefreshClick,
-      );
+      elements.backupsTable.removeEventListener("click", handleBackupsTableClick);
+      elements.masterDeleteButton.removeEventListener("click", onMasterDeleteClick);
+      elements.refreshBackupsButton.removeEventListener("click", onRefreshClick);
     },
   };
 }

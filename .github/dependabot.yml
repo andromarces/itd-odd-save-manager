@@ -1,13 +1,13 @@
 version: 2
 updates:
-  - package-ecosystem: 'github-actions'
-    directory: '/'
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: 'daily'
-  - package-ecosystem: 'rust-toolchain'
-    directory: '/'
+      interval: "daily"
+  - package-ecosystem: "rust-toolchain"
+    directory: "/"
     schedule:
-      interval: 'daily'
+      interval: "daily"
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -16,6 +16,6 @@ updates:
       vitest:
         patterns:
           - vitest
-          - '@vitest/*'
+          - "@vitest/*"
     open-pull-requests-limit: 10
     rebase-strategy: auto

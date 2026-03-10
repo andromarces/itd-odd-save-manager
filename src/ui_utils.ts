@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from "@tauri-apps/api/core";
 
 export interface SafeInvokeOptions {
   actionName?: string;
@@ -27,7 +27,7 @@ export function getInvokeErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-  if (typeof error === 'object' && error !== null) {
+  if (typeof error === "object" && error !== null) {
     try {
       return JSON.stringify(error);
     } catch {
@@ -42,10 +42,7 @@ let cachedLogContainer: HTMLDivElement | null = null;
 /**
  * Appends a message to the activity log with a timestamp.
  */
-export function logActivity(
-  message: string,
-  logContainer?: HTMLDivElement,
-): void {
+export function logActivity(message: string, logContainer?: HTMLDivElement): void {
   // Invalidated stale cache if element is removed from DOM
   if (cachedLogContainer && !document.body.contains(cachedLogContainer)) {
     cachedLogContainer = null;
@@ -54,15 +51,14 @@ export function logActivity(
   const container =
     logContainer ||
     cachedLogContainer ||
-    (cachedLogContainer =
-      document.querySelector<HTMLDivElement>('#activity-log'));
+    (cachedLogContainer = document.querySelector<HTMLDivElement>("#activity-log"));
   if (!container) return;
 
-  const entry = document.createElement('div');
-  entry.className = 'log-entry';
+  const entry = document.createElement("div");
+  entry.className = "log-entry";
 
-  const time = document.createElement('span');
-  time.className = 'time';
+  const time = document.createElement("span");
+  time.className = "time";
   time.textContent = new Date().toLocaleTimeString();
 
   entry.appendChild(time);
@@ -127,7 +123,7 @@ export async function invokeAction<T>(
   command: string,
   args: Record<string, unknown> | undefined,
   actionDescription: string,
-  options: Omit<SafeInvokeOptions, 'actionName'> = {},
+  options: Omit<SafeInvokeOptions, "actionName"> = {},
 ): Promise<T | undefined> {
   return safeInvoke<T>(command, args, {
     actionName: actionDescription,
@@ -164,34 +160,34 @@ export async function withBusyButton<T>(
 export function updateStatus(
   element: HTMLElement,
   message: string,
-  type: 'info' | 'success' | 'error' = 'info',
+  type: "info" | "success" | "error" = "info",
 ): void {
   element.textContent = message;
-  element.classList.add('status-text');
-  element.classList.toggle('success', type === 'success');
-  element.classList.toggle('error', type === 'error');
+  element.classList.add("status-text");
+  element.classList.toggle("success", type === "success");
+  element.classList.toggle("error", type === "error");
 }
 
 const MONTH_ABBREVIATIONS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 
 /**
  * Pads a number to two digits.
  */
 function padTwoDigits(value: number): string {
-  return value.toString().padStart(2, '0');
+  return value.toString().padStart(2, "0");
 }
 
 /**
@@ -206,7 +202,7 @@ function formatHour12(hours24: number): string {
  * Returns the meridiem marker for a local hour value.
  */
 function formatMeridiem(hours24: number): string {
-  return hours24 >= 12 ? 'PM' : 'AM';
+  return hours24 >= 12 ? "PM" : "AM";
 }
 
 /**
@@ -219,7 +215,7 @@ export function formatDate(isoString: string): string {
   }
 
   const day = padTwoDigits(date.getDate());
-  const month = MONTH_ABBREVIATIONS[date.getMonth()] ?? '???';
+  const month = MONTH_ABBREVIATIONS[date.getMonth()] ?? "???";
   const year = date.getFullYear().toString();
   const hours = formatHour12(date.getHours());
   const minutes = padTwoDigits(date.getMinutes());

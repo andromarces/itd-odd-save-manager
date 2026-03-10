@@ -1,9 +1,9 @@
-import { invokeAction, logActivity } from '../ui_utils';
-import type { AppElements } from './dom';
+import { invokeAction, logActivity } from "../ui_utils";
+import type { AppElements } from "./dom";
 
 type SettingsElements = Pick<
   AppElements,
-  'launchGameButton' | 'autoLaunchCheck' | 'autoCloseCheck' | 'maxBackupsInput'
+  "launchGameButton" | "autoLaunchCheck" | "autoCloseCheck" | "maxBackupsInput"
 >;
 
 export interface SettingsFeature {
@@ -16,9 +16,7 @@ export interface SettingsFeature {
 
  */
 
-export function setupSettingsFeature(
-  elements: SettingsElements,
-): SettingsFeature {
+export function setupSettingsFeature(elements: SettingsElements): SettingsFeature {
   /**
 
    * Saves game settings (auto launch and auto close).
@@ -35,7 +33,7 @@ export function setupSettingsFeature(
     const maxBackups = isNaN(rawMax) ? 100 : rawMax;
 
     await invokeAction(
-      'set_game_settings',
+      "set_game_settings",
 
       {
         auto_launch_game: autoLaunch,
@@ -45,7 +43,7 @@ export function setupSettingsFeature(
         max_backups_per_game: maxBackups,
       },
 
-      'save game settings',
+      "save game settings",
 
       {
         successLog: `Updated game settings: Auto-Launch=${autoLaunch}, Auto-Close=${autoClose}, Max-Backups=${maxBackups}`,
@@ -60,10 +58,10 @@ export function setupSettingsFeature(
    */
 
   async function launchGame(): Promise<void> {
-    logActivity('Launching game...');
+    logActivity("Launching game...");
 
-    await invokeAction('launch_game', undefined, 'launch game', {
-      successLog: 'Game launch command sent.',
+    await invokeAction("launch_game", undefined, "launch game", {
+      successLog: "Game launch command sent.",
 
       alertOnError: true,
     });
@@ -109,36 +107,36 @@ export function setupSettingsFeature(
     void saveGameSettings();
   }
 
-  elements.launchGameButton.addEventListener('click', handleLaunchGameClick);
+  elements.launchGameButton.addEventListener("click", handleLaunchGameClick);
 
-  elements.autoLaunchCheck.addEventListener('change', handleAutoLaunchChange);
+  elements.autoLaunchCheck.addEventListener("change", handleAutoLaunchChange);
 
-  elements.autoCloseCheck.addEventListener('change', handleAutoCloseChange);
+  elements.autoCloseCheck.addEventListener("change", handleAutoCloseChange);
 
-  elements.maxBackupsInput.addEventListener('change', handleMaxBackupsChange);
+  elements.maxBackupsInput.addEventListener("change", handleMaxBackupsChange);
 
   return {
     destroy: () => {
       elements.launchGameButton.removeEventListener(
-        'click',
+        "click",
 
         handleLaunchGameClick,
       );
 
       elements.autoLaunchCheck.removeEventListener(
-        'change',
+        "change",
 
         handleAutoLaunchChange,
       );
 
       elements.autoCloseCheck.removeEventListener(
-        'change',
+        "change",
 
         handleAutoCloseChange,
       );
 
       elements.maxBackupsInput.removeEventListener(
-        'change',
+        "change",
 
         handleMaxBackupsChange,
       );

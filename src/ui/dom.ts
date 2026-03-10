@@ -1,4 +1,4 @@
-import { getElement } from '../ui_utils';
+import { getElement } from "../ui_utils";
 
 export interface AppElements {
   detectButton: HTMLButtonElement;
@@ -170,43 +170,37 @@ const APP_TEMPLATE = `
  * Renders the application shell and returns the typed element references.
  */
 export function renderAppShell(): AppElements {
-  const app = getElement<HTMLDivElement>('#app');
+  const app = getElement<HTMLDivElement>("#app");
   app.innerHTML = APP_TEMPLATE;
 
   return {
-    detectButton: getElement<HTMLButtonElement>('#detect'),
-    pathsList: getElement<HTMLUListElement>('#paths'),
-    manualInput: getElement<HTMLInputElement>('#manual-path'),
-    saveButton: getElement<HTMLButtonElement>('#save-config'),
-    configStatus: getElement<HTMLParagraphElement>('#config-status'),
-    refreshBackupsButton: getElement<HTMLButtonElement>('#refresh-backups'),
-    masterDeleteButton: getElement<HTMLButtonElement>('#master-delete-btn'),
-    backupsTable: getElement<HTMLTableElement>('#backups-table'),
-    backupsList: getElement<HTMLTableSectionElement>('#backups-list'),
-    launchGameButton: getElement<HTMLButtonElement>('#launch-game'),
-    autoLaunchCheck: getElement<HTMLInputElement>('#auto-launch-check'),
-    autoCloseCheck: getElement<HTMLInputElement>('#auto-close-check'),
-    maxBackupsInput: getElement<HTMLInputElement>('#max-backups-input'),
-    tabButtons: document.querySelectorAll<HTMLButtonElement>('.tab-button'),
-    tabPanels: document.querySelectorAll<HTMLElement>('.tab-panel'),
+    detectButton: getElement<HTMLButtonElement>("#detect"),
+    pathsList: getElement<HTMLUListElement>("#paths"),
+    manualInput: getElement<HTMLInputElement>("#manual-path"),
+    saveButton: getElement<HTMLButtonElement>("#save-config"),
+    configStatus: getElement<HTMLParagraphElement>("#config-status"),
+    refreshBackupsButton: getElement<HTMLButtonElement>("#refresh-backups"),
+    masterDeleteButton: getElement<HTMLButtonElement>("#master-delete-btn"),
+    backupsTable: getElement<HTMLTableElement>("#backups-table"),
+    backupsList: getElement<HTMLTableSectionElement>("#backups-list"),
+    launchGameButton: getElement<HTMLButtonElement>("#launch-game"),
+    autoLaunchCheck: getElement<HTMLInputElement>("#auto-launch-check"),
+    autoCloseCheck: getElement<HTMLInputElement>("#auto-close-check"),
+    maxBackupsInput: getElement<HTMLInputElement>("#max-backups-input"),
+    tabButtons: document.querySelectorAll<HTMLButtonElement>(".tab-button"),
+    tabPanels: document.querySelectorAll<HTMLElement>(".tab-panel"),
     // Dialog
-    masterDeleteDialog: getElement<HTMLDialogElement>('#master-delete-dialog'),
-    masterDeleteForm: getElement<HTMLFormElement>('#master-delete-form'),
-    masterDeleteGameList: getElement<HTMLDivElement>(
-      '#master-delete-game-list',
-    ),
+    masterDeleteDialog: getElement<HTMLDialogElement>("#master-delete-dialog"),
+    masterDeleteForm: getElement<HTMLFormElement>("#master-delete-form"),
+    masterDeleteGameList: getElement<HTMLDivElement>("#master-delete-game-list"),
     masterDeleteModeRadios: document.querySelectorAll<HTMLInputElement>(
       'input[name="delete-mode"]',
     ),
     masterDeleteLockedRadios: document.querySelectorAll<HTMLInputElement>(
       'input[name="delete-locked"]',
     ),
-    masterDeleteCancelBtn: getElement<HTMLButtonElement>(
-      '#master-delete-cancel',
-    ),
-    masterDeleteConfirmBtn: getElement<HTMLButtonElement>(
-      '#master-delete-confirm',
-    ),
+    masterDeleteCancelBtn: getElement<HTMLButtonElement>("#master-delete-cancel"),
+    masterDeleteConfirmBtn: getElement<HTMLButtonElement>("#master-delete-confirm"),
   };
 }
 
@@ -215,21 +209,21 @@ export function renderAppShell(): AppElements {
  */
 export function setupTabNavigation(elements: AppElements): void {
   elements.tabButtons.forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener("click", () => {
       const targetTab = button.dataset.tab;
       if (!targetTab) return;
 
       // Update button states
       elements.tabButtons.forEach((btn) => {
         const isActive = btn.dataset.tab === targetTab;
-        btn.classList.toggle('active', isActive);
-        btn.setAttribute('aria-selected', String(isActive));
+        btn.classList.toggle("active", isActive);
+        btn.setAttribute("aria-selected", String(isActive));
       });
 
       // Update panel visibility
       elements.tabPanels.forEach((panel) => {
         const isActive = panel.dataset.tabPanel === targetTab;
-        panel.classList.toggle('active', isActive);
+        panel.classList.toggle("active", isActive);
         panel.hidden = !isActive;
       });
     });

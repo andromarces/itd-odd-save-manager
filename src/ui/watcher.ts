@@ -1,6 +1,6 @@
-import { invoke } from '@tauri-apps/api/core';
-import { isInitWatcherDeferredError } from '../watcher_init';
-import { getInvokeErrorMessage, logActivity } from '../ui_utils';
+import { invoke } from "@tauri-apps/api/core";
+import { isInitWatcherDeferredError } from "../watcher_init";
+import { getInvokeErrorMessage, logActivity } from "../ui_utils";
 
 /**
  * Initializes the watcher after the UI is painted, retrying until visible.
@@ -10,9 +10,9 @@ export function initWatcherAfterPaint(): void {
    * Attempts watcher initialization and retries if the UI is not visible yet.
    */
   const retryInitWatcher = (attempt: number): void => {
-    void invoke('init_watcher')
+    void invoke("init_watcher")
       .then(() => {
-        logActivity('Watcher initialized.');
+        logActivity("Watcher initialized.");
       })
       .catch((error) => {
         const message = getInvokeErrorMessage(error);

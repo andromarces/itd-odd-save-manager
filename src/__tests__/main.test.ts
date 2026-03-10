@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock('@tauri-apps/api/core', () => ({
+vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   transformCallback: vi.fn(),
 }));
 
-vi.mock('@tauri-apps/api/event', () => ({
+vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
@@ -16,15 +16,15 @@ function setupDom(): void {
   document.body.innerHTML = '<div id="app"></div>';
 }
 
-describe('restore confirmation message', () => {
+describe("restore confirmation message", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
     setupDom();
 
-    const { invoke } = await import('@tauri-apps/api/core');
+    const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation((command: string) => {
-      if (command === 'get_config') {
+      if (command === "get_config") {
         return Promise.resolve({
           save_path: null,
           auto_launch_game: false,
@@ -32,7 +32,7 @@ describe('restore confirmation message', () => {
           max_backups_per_game: 100,
         });
       }
-      if (command === 'is_auto_detection_supported') {
+      if (command === "is_auto_detection_supported") {
         return Promise.resolve(true);
       }
       return Promise.resolve(undefined);
@@ -42,31 +42,31 @@ describe('restore confirmation message', () => {
   /**
    * Verifies the display label for backup rows.
    */
-  it('uses a game label for backups', async () => {
-    const { getBackupDisplayName } = await import('../main');
+  it("uses a game label for backups", async () => {
+    const { getBackupDisplayName } = await import("../main");
 
     const label = getBackupDisplayName({
-      path: 'C:\\Backups\\gamesave_1.sav',
-      filename: 'gamesave_1.sav',
-      original_filename: 'gamesave_1.sav',
-      original_path: 'C:\\Saves\\gamesave_1.sav',
+      path: "C:\\Backups\\gamesave_1.sav",
+      filename: "gamesave_1.sav",
+      original_filename: "gamesave_1.sav",
+      original_path: "C:\\Saves\\gamesave_1.sav",
       size: 1024,
-      modified: '2025-01-01T12:00:00Z',
+      modified: "2025-01-01T12:00:00Z",
       game_number: 1,
       locked: false,
-      hash: 'mock-hash',
+      hash: "mock-hash",
     });
 
-    expect(label).toBe('Game 2');
+    expect(label).toBe("Game 2");
   });
 
   /**
    * Verifies that auto-detection is hidden when unsupported.
    */
-  it('hides auto-detection when unsupported', async () => {
-    const { invoke } = await import('@tauri-apps/api/core');
+  it("hides auto-detection when unsupported", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation((command: string) => {
-      if (command === 'get_config') {
+      if (command === "get_config") {
         return Promise.resolve({
           save_path: null,
           auto_launch_game: false,
@@ -74,17 +74,17 @@ describe('restore confirmation message', () => {
           max_backups_per_game: 100,
         });
       }
-      if (command === 'is_auto_detection_supported') {
+      if (command === "is_auto_detection_supported") {
         return Promise.resolve(false);
       }
       return Promise.resolve(undefined);
     });
 
-    const { applyAutoDetectionAvailability } = await import('../main');
+    const { applyAutoDetectionAvailability } = await import("../main");
     await applyAutoDetectionAvailability();
 
-    expect(document.querySelector('#detect')).toBeNull();
-    const emptyMessage = document.querySelector('#paths li.empty');
+    expect(document.querySelector("#detect")).toBeNull();
+    const emptyMessage = document.querySelector("#paths li.empty");
     expect(emptyMessage).not.toBeNull();
     expect(emptyMessage?.textContent).toBeTruthy();
   });

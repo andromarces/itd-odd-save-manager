@@ -18,4 +18,4 @@ export interface BackupInfo {
   note?: string | null;
 }
 
-export type StatusType = 'info' | 'success' | 'error';
+export type StatusType = "info" | "success" | "error";

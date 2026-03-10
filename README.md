@@ -70,13 +70,14 @@ Windows only.
 
 1. Clone the repository.
 2. Run `npm install` to install dependencies and configure git hooks.
-   - This project uses a `pre-commit` hook to enforce Rust formatting.
+   - This project uses a `pre-commit` hook to format tracked non-Rust files with `oxfmt` and Rust files with `rustfmt`.
 
 ### Build
 
 For detailed build instructions and reproducibility steps, please refer to [BUILDING.md](BUILDING.md).
 
 - `npm run dev` starts the development server.
+- `npm run format` formats tracked files with `oxfmt` and `rustfmt`.
 - `npm run tauri build` creates the production executable and installers.
 
 ## Verification

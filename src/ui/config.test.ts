@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock('@tauri-apps/api/core', () => ({
+vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
@@ -17,17 +17,17 @@ function createElements(): {
   autoCloseCheck: HTMLInputElement;
   maxBackupsInput: HTMLInputElement;
 } {
-  document.body.innerHTML = '';
+  document.body.innerHTML = "";
 
-  const manualInput = document.createElement('input');
-  const saveButton = document.createElement('button');
-  saveButton.textContent = 'Set Path';
-  const configStatus = document.createElement('p');
-  const detectButton = document.createElement('button');
-  const pathsList = document.createElement('ul');
-  const autoLaunchCheck = document.createElement('input');
-  const autoCloseCheck = document.createElement('input');
-  const maxBackupsInput = document.createElement('input');
+  const manualInput = document.createElement("input");
+  const saveButton = document.createElement("button");
+  saveButton.textContent = "Set Path";
+  const configStatus = document.createElement("p");
+  const detectButton = document.createElement("button");
+  const pathsList = document.createElement("ul");
+  const autoLaunchCheck = document.createElement("input");
+  const autoCloseCheck = document.createElement("input");
+  const maxBackupsInput = document.createElement("input");
 
   return {
     manualInput,
@@ -41,23 +41,23 @@ function createElements(): {
   };
 }
 
-describe('config refresh availability', () => {
+describe("config refresh availability", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
-    document.body.innerHTML = '';
+    document.body.innerHTML = "";
   });
 
-  it('enables refresh when config provides a valid save path', async () => {
-    const { invoke } = await import('@tauri-apps/api/core');
+  it("enables refresh when config provides a valid save path", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValue({
-      save_path: 'C:\\Saves',
+      save_path: "C:\\Saves",
       auto_launch_game: false,
       auto_close: false,
       max_backups_per_game: 100,
     });
 
-    const { createConfigFeature } = await import('./config');
+    const { createConfigFeature } = await import("./config");
     const elements = createElements();
     const setRefreshAvailability = vi.fn();
 
@@ -71,8 +71,8 @@ describe('config refresh availability', () => {
     expect(setRefreshAvailability).toHaveBeenLastCalledWith(true);
   });
 
-  it('disables refresh when no save path is configured', async () => {
-    const { invoke } = await import('@tauri-apps/api/core');
+  it("disables refresh when no save path is configured", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValue({
       save_path: null,
       auto_launch_game: false,
@@ -80,7 +80,7 @@ describe('config refresh availability', () => {
       max_backups_per_game: 100,
     });
 
-    const { createConfigFeature } = await import('./config');
+    const { createConfigFeature } = await import("./config");
     const elements = createElements();
     const setRefreshAvailability = vi.fn();
 
@@ -94,16 +94,16 @@ describe('config refresh availability', () => {
     expect(setRefreshAvailability).toHaveBeenLastCalledWith(false);
   });
 
-  it('disables refresh when the input diverges from the valid path', async () => {
-    const { invoke } = await import('@tauri-apps/api/core');
+  it("disables refresh when the input diverges from the valid path", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValue({
-      save_path: 'C:\\Saves',
+      save_path: "C:\\Saves",
       auto_launch_game: false,
       auto_close: false,
       max_backups_per_game: 100,
     });
 
-    const { createConfigFeature } = await import('./config');
+    const { createConfigFeature } = await import("./config");
     const elements = createElements();
     const setRefreshAvailability = vi.fn();
 
@@ -114,27 +114,27 @@ describe('config refresh availability', () => {
 
     await feature.loadConfig();
 
-    elements.manualInput.value = 'C:\\Other';
-    elements.manualInput.dispatchEvent(new Event('input', { bubbles: true }));
+    elements.manualInput.value = "C:\\Other";
+    elements.manualInput.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(setRefreshAvailability).toHaveBeenLastCalledWith(false);
   });
 
-  it('enables refresh after a successful save path validation', async () => {
-    const { invoke } = await import('@tauri-apps/api/core');
+  it("enables refresh after a successful save path validation", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation((command: string) => {
-      if (command === 'validate_path') {
+      if (command === "validate_path") {
         return Promise.resolve(true);
       }
-      if (command === 'set_save_path') {
-        return Promise.resolve('C:\\Saves');
+      if (command === "set_save_path") {
+        return Promise.resolve("C:\\Saves");
       }
       return Promise.resolve(undefined);
     });
 
-    const { createConfigFeature } = await import('./config');
+    const { createConfigFeature } = await import("./config");
     const elements = createElements();
-    elements.manualInput.value = 'C:\\Saves';
+    elements.manualInput.value = "C:\\Saves";
     const setRefreshAvailability = vi.fn();
 
     const feature = createConfigFeature(elements, {
@@ -145,6 +145,6 @@ describe('config refresh availability', () => {
     await feature.savePath();
 
     expect(setRefreshAvailability).toHaveBeenLastCalledWith(true);
-    expect(elements.manualInput.value).toBe('C:\\Saves');
+    expect(elements.manualInput.value).toBe("C:\\Saves");
   });
 });

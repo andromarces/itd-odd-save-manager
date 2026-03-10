@@ -1,16 +1,16 @@
-import { invokeAction, logActivity, withBusyButton } from '../../ui_utils';
-import type { AppElements } from '../dom';
-import type { BackupInfo } from '../types';
+import { invokeAction, logActivity, withBusyButton } from "../../ui_utils";
+import type { AppElements } from "../dom";
+import type { BackupInfo } from "../types";
 
 type DialogElements = Pick<
   AppElements,
-  | 'masterDeleteDialog'
-  | 'masterDeleteForm'
-  | 'masterDeleteGameList'
-  | 'masterDeleteModeRadios'
-  | 'masterDeleteLockedRadios'
-  | 'masterDeleteCancelBtn'
-  | 'masterDeleteConfirmBtn'
+  | "masterDeleteDialog"
+  | "masterDeleteForm"
+  | "masterDeleteGameList"
+  | "masterDeleteModeRadios"
+  | "masterDeleteLockedRadios"
+  | "masterDeleteCancelBtn"
+  | "masterDeleteConfirmBtn"
 >;
 
 /**
@@ -27,28 +27,16 @@ export class MasterDeleteController {
     this.elements = elements;
     this.onComplete = onComplete;
 
-    this.elements.masterDeleteCancelBtn.addEventListener(
-      'click',
-      this.handleCancel,
-    );
-    this.elements.masterDeleteForm.addEventListener(
-      'submit',
-      this.handleSubmitEvent,
-    );
+    this.elements.masterDeleteCancelBtn.addEventListener("click", this.handleCancel);
+    this.elements.masterDeleteForm.addEventListener("submit", this.handleSubmitEvent);
   }
 
   /**
    * Cleans up event listeners.
    */
   destroy() {
-    this.elements.masterDeleteCancelBtn.removeEventListener(
-      'click',
-      this.handleCancel,
-    );
-    this.elements.masterDeleteForm.removeEventListener(
-      'submit',
-      this.handleSubmitEvent,
-    );
+    this.elements.masterDeleteCancelBtn.removeEventListener("click", this.handleCancel);
+    this.elements.masterDeleteForm.removeEventListener("submit", this.handleSubmitEvent);
   }
 
   private handleCancel = () => {
@@ -64,21 +52,21 @@ export class MasterDeleteController {
    */
   open(backups: BackupInfo[]) {
     if (backups.length === 0) {
-      alert('No backups available to delete.');
+      alert("No backups available to delete.");
       return;
     }
 
     const uniqueGames = new Set<number>();
     backups.forEach((b) => uniqueGames.add(b.game_number));
 
-    this.elements.masterDeleteGameList.innerHTML = '';
+    this.elements.masterDeleteGameList.innerHTML = "";
     const sortedGames = Array.from(uniqueGames).sort((a, b) => a - b);
 
     sortedGames.forEach((gameNum) => {
-      const label = document.createElement('label');
-      label.className = 'checkbox-label';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
+      const label = document.createElement("label");
+      label.className = "checkbox-label";
+      const input = document.createElement("input");
+      input.type = "checkbox";
       input.value = gameNum.toString();
       input.checked = true;
       label.appendChild(input);
@@ -114,54 +102,46 @@ export class MasterDeleteController {
     });
 
     if (selectedGames.length === 0) {
-      alert('Please select at least one game.');
+      alert("Please select at least one game.");
       return;
     }
 
     let keepLatest = true;
     this.elements.masterDeleteModeRadios.forEach((radio) => {
-      if (radio.checked && radio.value === 'all') {
+      if (radio.checked && radio.value === "all") {
         keepLatest = false;
       }
     });
 
     let deleteLocked = false;
     this.elements.masterDeleteLockedRadios.forEach((radio) => {
-      if (radio.checked && radio.value === 'include') {
+      if (radio.checked && radio.value === "include") {
         deleteLocked = true;
       }
     });
 
-    const modeText = keepLatest
-      ? 'Delete all except latest'
-      : 'Delete ALL backups';
-    const lockedText = deleteLocked
-      ? '(INCLUDING locked backups)'
-      : '(excluding locked backups)';
+    const modeText = keepLatest ? "Delete all except latest" : "Delete ALL backups";
+    const lockedText = deleteLocked ? "(INCLUDING locked backups)" : "(excluding locked backups)";
     const confirmMsg = `Are you sure?\n\nAction: ${modeText}\nTarget: ${selectedGames.length} Game(s)\n${lockedText}\n\nThis cannot be undone.`;
 
     if (!confirm(confirmMsg)) return;
 
     const btn = this.elements.masterDeleteConfirmBtn;
     try {
-      const deletedCount = await withBusyButton(
-        btn,
-        'Deleting...',
-        async () => {
-          return await invokeAction<number>(
-            'batch_delete_backups_command',
-            {
-              game_numbers: selectedGames,
-              keep_latest: keepLatest,
-              delete_locked: deleteLocked,
-            },
-            'batch delete',
-            {
-              onError: () => logActivity('Failed to perform batch delete.'),
-            },
-          );
-        },
-      );
+      const deletedCount = await withBusyButton(btn, "Deleting...", async () => {
+        return await invokeAction<number>(
+          "batch_delete_backups_command",
+          {
+            game_numbers: selectedGames,
+            keep_latest: keepLatest,
+            delete_locked: deleteLocked,
+          },
+          "batch delete",
+          {
+            onError: () => logActivity("Failed to perform batch delete."),
+          },
+        );
+      });
 
       if (deletedCount !== undefined) {
         logActivity(`Batch delete completed. Removed ${deletedCount} backups.`);
@@ -169,7 +149,7 @@ export class MasterDeleteController {
         await this.onComplete();
       }
     } catch (error) {
-      console.error('Master delete flow failed:', error);
+      console.error("Master delete flow failed:", error);
     }
   }
 }

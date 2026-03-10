@@ -27,7 +27,7 @@
 }
 
 body {
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-family: "Segoe UI", system-ui, sans-serif;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   margin: 0;
@@ -55,7 +55,7 @@ body {
 }
 
 h1 {
-  font-family: Georgia, 'Times New Roman', serif;
+  font-family: Georgia, "Times New Roman", serif;
   font-size: 2.5rem;
   font-style: normal;
   font-weight: 400;
@@ -100,7 +100,7 @@ h1 {
 }
 
 .tab-button.active::after {
-  content: '';
+  content: "";
   position: absolute;
   bottom: -9px;
   left: 0;
@@ -127,7 +127,7 @@ h1 {
 }
 
 h2 {
-  font-family: Georgia, 'Times New Roman', serif;
+  font-family: Georgia, "Times New Roman", serif;
   font-size: 1.1rem;
   font-weight: 400;
   font-style: italic;
@@ -225,8 +225,8 @@ button.secondary:hover {
   white-space: nowrap;
 }
 
-input[type='text'],
-input[type='number'] {
+input[type="text"],
+input[type="number"] {
   padding: 8px 12px;
   border: 1px solid var(--color-border);
   background-color: var(--color-bg-input);
@@ -235,8 +235,8 @@ input[type='number'] {
   font-size: 0.9rem;
 }
 
-input[type='text']:focus,
-input[type='number']:focus {
+input[type="text"]:focus,
+input[type="number"]:focus {
   outline: none;
   border-color: var(--color-accent-dim);
 }
@@ -267,7 +267,7 @@ input[type='number']:focus {
   color: var(--color-text-primary);
 }
 
-input[type='checkbox'] {
+input[type="checkbox"] {
   width: 16px;
   height: 16px;
   accent-color: var(--color-accent);
@@ -432,7 +432,7 @@ tr.note-row td {
   padding: 12px;
   height: 300px;
   overflow-y: auto;
-  font-family: 'Consolas', 'Courier New', monospace;
+  font-family: "Consolas", "Courier New", monospace;
   font-size: 0.8rem;
   white-space: pre-wrap;
 }
@@ -513,7 +513,7 @@ tr.note-row td {
   color: var(--color-text-primary);
 }
 
-input[type='radio'] {
+input[type="radio"] {
   width: 16px;
   height: 16px;
   accent-color: var(--color-accent);

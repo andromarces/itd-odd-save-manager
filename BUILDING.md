@@ -39,7 +39,7 @@ Git hooks are managed by [Husky](https://typicode.github.io/husky) and run autom
 
 Runs [lint-staged](https://github.com/lint-staged/lint-staged) against staged files only:
 
-- **JS/TS files** (`src/**/*.{ts,js}`): formatted with `oxfmt`.
+- **Tracked non-Rust files supported by `oxfmt`** (`*.{css,html,json,json5,jsonc,js,jsx,md,mdx,ts,tsx,toml,vue,yaml,yml}`): formatted with `oxfmt`.
 - **Rust files** (`src-tauri/**/*.rs`): formatted with `rustfmt --edition 2021`.
 
 ### pre-push
@@ -55,6 +55,12 @@ When no upstream branch is configured (e.g., on the first push of a new branch),
 
    ```bash
    npm run build
+   ```
+
+   To format the tracked non-Rust files that `oxfmt` supports, run:
+
+   ```bash
+   npm run format:oxfmt
    ```
 
 4. **Build Application**

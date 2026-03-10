@@ -1,7 +1,7 @@
 {
   "name": "itd-odd-save-manager",
-  "private": true,
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,12 +11,13 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "tauri": "tauri",
-    "format": "cd src-tauri && cargo fmt",
+    "format": "npm run format:oxfmt && npm run format:rust",
+    "format:check": "npm run format:oxfmt:check && npm run format:rust:check",
+    "format:oxfmt": "node ./scripts/run-oxfmt-tracked.mjs",
+    "format:oxfmt:check": "node ./scripts/run-oxfmt-tracked.mjs --check",
+    "format:rust": "cd src-tauri && cargo fmt",
+    "format:rust:check": "cd src-tauri && cargo fmt --all -- --check",
     "prepare": "husky"
-  },
-  "lint-staged": {
-    "src/**/*.{ts,js}": "oxfmt",
-    "src-tauri/**/*.rs": "rustfmt --edition 2021"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1"
@@ -32,5 +33,9 @@
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vitest": "^4.0.18"
+  },
+  "lint-staged": {
+    "**/*.{cjs,css,cts,html,js,json,json5,jsonc,jsx,md,mdx,mjs,mts,ts,tsx,toml,vue,yaml,yml}": "node ./scripts/run-oxfmt-tracked.mjs",
+    "src-tauri/**/*.rs": "rustfmt --edition 2021"
   }
 }

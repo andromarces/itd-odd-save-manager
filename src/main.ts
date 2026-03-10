@@ -1,15 +1,15 @@
 // ITD ODD Save Manager by andromarces
 
-import './style.css';
+import "./style.css";
 import {
   buildRestoreConfirmationMessage,
   createBackupsFeature,
   getBackupDisplayName,
-} from './ui/backups';
-import { createConfigFeature } from './ui/config';
-import { renderAppShell, setupTabNavigation } from './ui/dom';
-import { setupSettingsFeature } from './ui/settings';
-import { initWatcherAfterPaint } from './ui/watcher';
+} from "./ui/backups";
+import { createConfigFeature } from "./ui/config";
+import { renderAppShell, setupTabNavigation } from "./ui/dom";
+import { setupSettingsFeature } from "./ui/settings";
+import { initWatcherAfterPaint } from "./ui/watcher";
 
 const elements = renderAppShell();
 setupTabNavigation(elements);
@@ -38,7 +38,7 @@ void configFeature.loadConfig();
 initWatcherAfterPaint();
 
 // Cleanup
-window.addEventListener('beforeunload', () => {
+window.addEventListener("beforeunload", () => {
   backupsFeature.destroy();
   configFeature.destroy();
   settingsFeature.destroy();
