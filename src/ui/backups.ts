@@ -41,6 +41,7 @@ export interface BackupsFeature {
 export function createBackupsFeature(elements: BackupsElements): BackupsFeature {
   let currentBackups: BackupInfo[] = [];
   let currentBackupsMap = new Map<string, BackupInfo>();
+  let rowMap = new Map<string, HTMLTableRowElement>();
   let loadInFlight: Promise<void> | null = null;
   let loadGeneration = 0;
   let pendingRefresh = false;
@@ -55,18 +56,18 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
   });
 
   /**
-   * Helper to find a row by backup ID.
+   * Returns the table row for a backup by its path, or undefined if not rendered.
    */
   function findRowByBackupId(id: string): HTMLTableRowElement | undefined {
-    return Array.from(elements.backupsList.children).find(
-      (el) => (el as HTMLElement).dataset.backupId === id,
-    ) as HTMLTableRowElement | undefined;
+    return rowMap.get(id);
   }
 
   /**
    * Renders the list of backups into the table body.
    */
   function renderBackups(backups: BackupInfo[]): void {
+    rowMap = new Map();
+
     if (backups.length === 0) {
       elements.backupsList.innerHTML =
         '<tr><td colspan="3" class="empty">No backups found.</td></tr>';
@@ -75,7 +76,9 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
 
     const fragment = document.createDocumentFragment();
     backups.forEach((backup) => {
-      fragment.appendChild(createBackupRow(backup));
+      const row = createBackupRow(backup);
+      rowMap.set(backup.path, row);
+      fragment.appendChild(row);
       if (backup.note) {
         fragment.appendChild(createNoteRow(backup.note));
       }
@@ -153,6 +156,7 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
         {
           onError: () => {
             if (generation !== loadGeneration) return;
+            rowMap = new Map();
             elements.backupsList.innerHTML =
               '<tr><td colspan="3" class="error">Failed to load backups</td></tr>';
           },
@@ -216,6 +220,7 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
 
       if (row) {
         const newRow = createBackupRow(backup);
+        rowMap.set(backup.path, newRow);
         elements.backupsList.replaceChild(newRow, row);
       } else {
         // Fallback if row not found (shouldn't happen usually)
@@ -250,6 +255,7 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
 
       if (row) {
         const newRow = createBackupRow(backup);
+        rowMap.set(backup.path, newRow);
         elements.backupsList.replaceChild(newRow, row);
 
         const nextSibling = newRow.nextElementSibling;
@@ -310,6 +316,7 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
           // If input is empty, we can't reload, but we can try to clean up the stale DOM row
           const row = findRowByBackupId(backup.path);
           if (row) {
+            rowMap.delete(backup.path);
             row.remove();
             // Also remove associated note row if present
             const nextSibling = row.nextElementSibling;

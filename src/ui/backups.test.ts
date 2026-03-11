@@ -332,6 +332,115 @@ describe("createBackupsFeature - loadBackups serialization", () => {
   });
 });
 
+describe("createBackupsFeature - rowMap integrity after failed load", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = "";
+  });
+
+  /**
+   * Regression: a failed load must clear rowMap so that a subsequent lock action
+   * takes the safe renderBackups fallback instead of calling replaceChild on a
+   * detached row, which would throw NotFoundError.
+   */
+  it("falls back to renderBackups on lock action after a failed load clears rowMap", async () => {
+    const elements = setupDom();
+    const { invokeAction } = await import("../ui_utils");
+    const { createBackupsFeature } = await import("./backups");
+
+    const backup = makeBackup({ filename: "stale.sav", path: "/b/stale.sav" });
+
+    vi.mocked(invokeAction)
+      .mockResolvedValueOnce([backup]) // first load: success — rowMap populated
+      .mockImplementationOnce(
+        async (
+          _action: unknown,
+          _params: unknown,
+          _label: unknown,
+          options?: { onError?: () => void },
+        ) => {
+          options?.onError?.(); // second load: failure — clears rowMap and sets error innerHTML
+          return undefined;
+        },
+      )
+      .mockResolvedValueOnce(true); // toggle lock: success
+
+    const feature = createBackupsFeature(elements);
+
+    await feature.loadBackups();
+    await feature.loadBackups();
+
+    expect(elements.backupsList.innerHTML).toContain("error");
+
+    // Inject a synthetic button and fire the lock action via table-level delegation
+    const btn = document.createElement("button");
+    btn.dataset.backupId = backup.path;
+    btn.dataset.action = "lock";
+    elements.backupsList.appendChild(btn);
+    btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // Fallback renderBackups must re-render the backup without throwing
+    await vi.waitUntil(() => elements.backupsList.innerHTML.includes("stale.sav"));
+    expect(elements.backupsList.innerHTML).not.toContain("error");
+
+    feature.destroy();
+  });
+
+  /**
+   * Regression: a failed load must clear rowMap so that a subsequent note action
+   * takes the safe renderBackups fallback instead of calling replaceChild on a
+   * detached row, which would throw NotFoundError.
+   */
+  it("falls back to renderBackups on note action after a failed load clears rowMap", async () => {
+    const elements = setupDom();
+    const { invokeAction } = await import("../ui_utils");
+    const { createBackupsFeature } = await import("./backups");
+
+    const backup = makeBackup({ filename: "stale.sav", path: "/b/stale.sav" });
+    vi.spyOn(window, "prompt").mockReturnValue("updated note");
+
+    vi.mocked(invokeAction)
+      .mockResolvedValueOnce([backup]) // first load: success — rowMap populated
+      .mockImplementationOnce(
+        async (
+          _action: unknown,
+          _params: unknown,
+          _label: unknown,
+          options?: { onError?: () => void },
+        ) => {
+          options?.onError?.(); // second load: failure — clears rowMap and sets error innerHTML
+          return undefined;
+        },
+      )
+      .mockResolvedValueOnce(true); // set note: success
+
+    const feature = createBackupsFeature(elements);
+
+    await feature.loadBackups();
+    await feature.loadBackups();
+
+    expect(elements.backupsList.innerHTML).toContain("error");
+
+    // Inject a synthetic button and fire the note action via table-level delegation
+    const btn = document.createElement("button");
+    btn.dataset.backupId = backup.path;
+    btn.dataset.action = "note";
+    elements.backupsList.appendChild(btn);
+    btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // Fallback renderBackups must re-render the backup without throwing
+    await vi.waitUntil(() => elements.backupsList.innerHTML.includes("stale.sav"));
+    expect(elements.backupsList.innerHTML).not.toContain("error");
+
+    feature.destroy();
+  });
+});
+
 describe("createBackupsFeature - refresh button state", () => {
   beforeEach(() => {
     vi.resetModules();
