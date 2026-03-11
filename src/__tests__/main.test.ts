@@ -5,12 +5,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   transformCallback: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn().mockResolvedValue(() => {}),
-}));
-
 /**
- * Initializes the DOM container expected by the app module.
+ * Initializes the DOM container expected by the shell renderer.
  */
 function setupDom(): void {
   document.body.innerHTML = '<div id="app"></div>';
@@ -43,7 +39,7 @@ describe("restore confirmation message", () => {
    * Verifies the display label for backup rows.
    */
   it("uses a game label for backups", async () => {
-    const { getBackupDisplayName } = await import("../main");
+    const { getBackupDisplayName } = await import("../ui/backups/render");
 
     const label = getBackupDisplayName({
       path: "C:\\Backups\\gamesave_1.sav",
@@ -80,8 +76,16 @@ describe("restore confirmation message", () => {
       return Promise.resolve(undefined);
     });
 
-    const { applyAutoDetectionAvailability } = await import("../main");
-    await applyAutoDetectionAvailability();
+    const { renderAppShell } = await import("../ui/dom");
+    const { createConfigFeature } = await import("../ui/config");
+
+    const elements = renderAppShell();
+    const configFeature = createConfigFeature(elements, {
+      loadBackups: vi.fn().mockResolvedValue(undefined),
+      setRefreshAvailability: vi.fn(),
+    });
+
+    await configFeature.applyAutoDetectionAvailability();
 
     expect(document.querySelector("#detect")).toBeNull();
     const emptyMessage = document.querySelector("#paths li.empty");
