@@ -247,12 +247,10 @@ pub fn start_monitor<R: Runtime>(app: AppHandle<R>) {
                     true,
                     ProcessRefreshKind::nothing(),
                 );
-                let game_running = sys.processes().values().any(|p| {
-                    p.name()
-                        .to_str()
-                        .map(|n| is_game_process(n))
-                        .unwrap_or(false)
-                });
+                let game_running = sys
+                    .processes()
+                    .values()
+                    .any(|p| p.name().to_str().map(is_game_process).unwrap_or(false));
 
                 match apply_monitor_tick(&mut game_was_running, game_running, &invalidator) {
                     MonitorAction::GameDetected => {
