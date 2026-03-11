@@ -153,14 +153,10 @@ fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: us
     let mut backups_created = false;
     if let Ok(backup_root) = ensure_backup_root(save_dir) {
         let mut index = load_index(&backup_root);
-        let filter = if game_numbers.len() == 1 {
-            game_numbers.iter().next().cloned()
-        } else {
-            None
-        };
-        let backups = crate::backup::get_backups(save_dir, true, filter).unwrap_or_default();
 
         for &game_number in game_numbers {
+            let backups =
+                crate::backup::get_backups(save_dir, true, Some(game_number)).unwrap_or_default();
             match perform_backup_for_game_internal(
                 save_dir,
                 &backup_root,
