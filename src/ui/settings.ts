@@ -30,7 +30,9 @@ export function setupSettingsFeature(elements: SettingsElements): SettingsFeatur
 
     const rawMax = parseInt(elements.maxBackupsInput.value, 10);
 
-    const maxBackups = isNaN(rawMax) ? 100 : rawMax;
+    const maxBackups = isNaN(rawMax) ? 100 : Math.max(0, rawMax);
+
+    elements.maxBackupsInput.value = String(maxBackups);
 
     await invokeAction(
       "set_game_settings",
