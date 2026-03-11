@@ -1,9 +1,11 @@
 // ITD ODD Save Manager by andromarces
 
 use crate::watcher::FileWatcher;
+use crate::MonitorInvalidator;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use tauri::State;
 
@@ -316,7 +318,23 @@ pub async fn set_save_path(
     Ok(final_path_str)
 }
 
+/// Signals the monitor invalidator when `auto_close` transitions from enabled to disabled.
+///
+/// No-op for all other transition combinations (`false→false`, `false→true`, `true→true`).
+pub(crate) fn signal_invalidator_if_disabled(
+    was_enabled: bool,
+    now_enabled: bool,
+    invalidator: &MonitorInvalidator,
+) {
+    if was_enabled && !now_enabled {
+        invalidator.0.store(true, Ordering::Relaxed);
+    }
+}
+
 /// Sets the game launch and auto-close settings.
+///
+/// When `auto_close` transitions from enabled to disabled, signals the process
+/// monitor via `MonitorInvalidator` to clear any stale game-running state.
 ///
 /// # Arguments
 ///
@@ -327,6 +345,7 @@ pub async fn set_save_path(
 pub async fn set_game_settings(
     config_state: State<'_, ConfigState>,
     watcher: State<'_, FileWatcher>,
+    invalidator: State<'_, MonitorInvalidator>,
     auto_launch_game: bool,
     auto_close: bool,
     max_backups_per_game: usize,
@@ -338,11 +357,12 @@ pub async fn set_game_settings(
         max_backups_per_game
     );
 
-    let (limit_changed, old_limit) = {
+    let (limit_changed, old_limit, auto_close_was_enabled) = {
         let guard = config_state.0.lock().map_err(|e| e.to_string())?;
         (
             guard.max_backups_per_game != max_backups_per_game,
             guard.max_backups_per_game,
+            guard.auto_close,
         )
     };
 
@@ -351,6 +371,8 @@ pub async fn set_game_settings(
         config.auto_close = auto_close;
         config.max_backups_per_game = max_backups_per_game;
     })?;
+
+    signal_invalidator_if_disabled(auto_close_was_enabled, auto_close, &invalidator);
 
     if limit_changed {
         // Extract the watched path while holding the lock, then release it so
@@ -684,5 +706,67 @@ mod tests {
         );
 
         watcher.stop();
+    }
+
+    /// Verifies the invalidator is signaled when auto_close transitions true to false.
+    #[test]
+    fn test_signal_invalidator_set_on_disable() {
+        use crate::MonitorInvalidator;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let inv = MonitorInvalidator(Arc::new(AtomicBool::new(false)));
+        signal_invalidator_if_disabled(true, false, &inv);
+        assert!(inv.0.load(Ordering::Relaxed));
+    }
+
+    /// Verifies the monitor-side swap clears the signal and returns the prior value.
+    #[test]
+    fn test_signal_invalidator_swap_clears_and_returns_true() {
+        use crate::MonitorInvalidator;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let inv = MonitorInvalidator(Arc::new(AtomicBool::new(false)));
+        signal_invalidator_if_disabled(true, false, &inv);
+        // Simulate the monitor's swap call
+        assert!(inv.0.swap(false, Ordering::Relaxed));
+        assert!(!inv.0.load(Ordering::Relaxed));
+    }
+
+    /// Verifies the invalidator is not signaled when auto_close was already disabled.
+    #[test]
+    fn test_signal_invalidator_no_op_false_to_false() {
+        use crate::MonitorInvalidator;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let inv = MonitorInvalidator(Arc::new(AtomicBool::new(false)));
+        signal_invalidator_if_disabled(false, false, &inv);
+        assert!(!inv.0.load(Ordering::Relaxed));
+    }
+
+    /// Verifies the invalidator is not signaled when auto_close is being enabled.
+    #[test]
+    fn test_signal_invalidator_no_op_false_to_true() {
+        use crate::MonitorInvalidator;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let inv = MonitorInvalidator(Arc::new(AtomicBool::new(false)));
+        signal_invalidator_if_disabled(false, true, &inv);
+        assert!(!inv.0.load(Ordering::Relaxed));
+    }
+
+    /// Verifies the invalidator is not signaled when auto_close remains enabled.
+    #[test]
+    fn test_signal_invalidator_no_op_true_to_true() {
+        use crate::MonitorInvalidator;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let inv = MonitorInvalidator(Arc::new(AtomicBool::new(false)));
+        signal_invalidator_if_disabled(true, true, &inv);
+        assert!(!inv.0.load(Ordering::Relaxed));
     }
 }

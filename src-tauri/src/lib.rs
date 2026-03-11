@@ -13,10 +13,19 @@ mod wrapper_launch;
 
 use config::{AppConfig, ConfigState};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tauri::{async_runtime, Manager};
 use tauri_plugin_notification::NotificationExt;
 use watcher::FileWatcher;
 use window::show_main_window;
+
+/// Signals the process monitor to invalidate its game-running state.
+///
+/// Written to `true` by `set_game_settings` when `auto_close` transitions from
+/// enabled to disabled. Read and cleared atomically by the monitor loop before
+/// each scan, ensuring `game_was_running` is never stale across a disable event.
+pub struct MonitorInvalidator(pub Arc<AtomicBool>);
 
 /// Initializes the configuration, performing auto-detection if necessary.
 fn bootstrap_config(config_path: &Path) -> AppConfig {
@@ -59,6 +68,7 @@ pub fn run() {
         }))
         .manage(ConfigState(std::sync::Mutex::new(initial_config.clone())))
         .manage(watcher)
+        .manage(MonitorInvalidator(Arc::new(AtomicBool::new(false))))
         .setup(move |app| {
             // Logger setup
             if cfg!(debug_assertions) {
