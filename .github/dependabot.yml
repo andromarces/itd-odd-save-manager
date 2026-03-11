@@ -1,21 +1,47 @@
 version: 2
+
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "daily"
+    open-pull-requests-limit: 10
+    rebase-strategy: "auto"
+
   - package-ecosystem: "rust-toolchain"
     directory: "/"
     schedule:
       interval: "daily"
-  - package-ecosystem: npm
-    directory: /
+    open-pull-requests-limit: 10
+    rebase-strategy: "auto"
+
+  - package-ecosystem: "npm"
+    directory: "/"
     schedule:
-      interval: daily
+      interval: "daily"
     groups:
+      tauri-js:
+        patterns:
+          - "@tauri-apps/*"
       vitest:
         patterns:
           - vitest
           - "@vitest/*"
+      oxc:
+        patterns:
+          - oxfmt
+          - oxlint
     open-pull-requests-limit: 10
-    rebase-strategy: auto
+    rebase-strategy: "auto"
+
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "daily"
+    groups:
+      tauri-rust:
+        patterns:
+          - "tauri"
+          - "tauri-*"
+    open-pull-requests-limit: 10
+    rebase-strategy: "auto"
