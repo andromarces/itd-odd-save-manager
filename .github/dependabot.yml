@@ -15,24 +15,26 @@ updates:
     open-pull-requests-limit: 10
     rebase-strategy: "auto"
 
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: npm
+    directory: /
     schedule:
-      interval: "daily"
+      interval: daily
     groups:
-      tauri-js:
-        patterns:
-          - "@tauri-apps/*"
       vitest:
         patterns:
           - vitest
+          - "@vitest/coverage-v8"
           - "@vitest/*"
-      oxc:
+      git-hooks:
+        patterns:
+          - husky
+          - lint-staged
+      ox-tooling:
         patterns:
           - oxfmt
           - oxlint
     open-pull-requests-limit: 10
-    rebase-strategy: "auto"
+    rebase-strategy: auto
 
   - package-ecosystem: "cargo"
     directory: "/src-tauri"

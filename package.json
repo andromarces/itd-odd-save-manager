@@ -35,7 +35,7 @@
     "vitest": "^4.0.18"
   },
   "lint-staged": {
-    "**/*.{cjs,css,cts,html,js,json,json5,jsonc,jsx,md,mdx,mjs,mts,ts,tsx,toml,vue,yaml,yml}": "node ./scripts/run-oxfmt-tracked.mjs",
-    "src-tauri/**/*.rs": "rustfmt --edition 2021"
+    "!(*.rs)": "node ./scripts/run-oxfmt-tracked.mjs",
+    "**/*.rs": "rustfmt --edition 2021"
   }
 }
