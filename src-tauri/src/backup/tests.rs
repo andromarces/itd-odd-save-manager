@@ -1,4 +1,8 @@
 #[cfg(test)]
+#[expect(
+    clippy::module_inception,
+    reason = "file is the tests module declared in mod.rs; the inner mod groups the suite under the same name"
+)]
 mod tests {
     use crate::backup::cleanup::delete_backups_batch;
     use crate::backup::common::{BACKUP_DIR_NAME, INDEX_FILE_NAME};
@@ -472,7 +476,7 @@ mod tests {
         let game_number = 1;
         let main_sav = save_dir.join("gamesave_1.sav");
 
-        let mut create_backup = |content: &str| -> String {
+        let create_backup = |content: &str| -> String {
             {
                 let mut f = File::create(&main_sav).unwrap();
                 writeln!(f, "{}", content).unwrap();
@@ -614,6 +618,10 @@ mod tests {
         unix,
         ignore = "set_readonly is not enforced for root processes on Unix"
     )]
+    #[expect(
+        clippy::permissions_set_readonly_false,
+        reason = "test cleanup restores write access before assertions; Windows-only path"
+    )]
     fn test_persist_failure_propagates_from_backup() {
         let dir = tempdir().unwrap();
         let save_dir = dir.path();
@@ -661,6 +669,10 @@ mod tests {
         unix,
         ignore = "set_readonly is not enforced for root processes on Unix"
     )]
+    #[expect(
+        clippy::permissions_set_readonly_false,
+        reason = "test cleanup restores write access before assertions; Windows-only path"
+    )]
     fn test_persist_failure_propagates_from_batch_delete() {
         let dir = tempdir().unwrap();
         let save_dir = dir.path();
@@ -698,6 +710,10 @@ mod tests {
     #[cfg_attr(
         unix,
         ignore = "set_readonly is not enforced for root processes on Unix"
+    )]
+    #[expect(
+        clippy::permissions_set_readonly_false,
+        reason = "test cleanup restores write access before assertions; Windows-only path"
     )]
     fn test_persist_failure_propagates_from_restore() {
         let dir = tempdir().unwrap();

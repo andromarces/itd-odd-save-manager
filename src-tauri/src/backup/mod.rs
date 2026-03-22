@@ -19,7 +19,5 @@ pub use notes::{set_backup_lock, set_backup_note};
 pub use restore::restore_backup;
 
 // Internal exports needed for other modules
-#[allow(unused_imports)]
-pub(crate) use create::perform_backup_for_game;
 pub(crate) use create::perform_backup_for_game_internal;
 pub(crate) use index::{ensure_backup_root, load_index, save_index};

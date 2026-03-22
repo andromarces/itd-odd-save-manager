@@ -42,6 +42,105 @@ pub async fn launch_game<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     }
 }
 
+/// Outcome of a single enabled monitor iteration.
+pub(crate) enum MonitorAction {
+    /// Game process newly observed for the first time.
+    GameDetected,
+    /// Game process was running and has now exited; application should exit.
+    GameExited,
+    /// No state change this iteration.
+    NoChange,
+}
+
+/// Applies invalidation and game-state tracking for one enabled monitor iteration.
+///
+/// Clears `game_was_running` if the invalidator flag was set (indicating `auto_close`
+/// was disabled since the previous scan), then derives the appropriate `MonitorAction`
+/// from the current `game_running` observation.
+pub(crate) fn apply_monitor_tick(
+    game_was_running: &mut bool,
+    game_running: bool,
+    invalidator: &Arc<AtomicBool>,
+) -> MonitorAction {
+    if invalidator.swap(false, Ordering::Relaxed) {
+        *game_was_running = false;
+    }
+
+    if game_running {
+        let first_detection = !*game_was_running;
+        *game_was_running = true;
+        if first_detection {
+            MonitorAction::GameDetected
+        } else {
+            MonitorAction::NoChange
+        }
+    } else if *game_was_running {
+        *game_was_running = false;
+        MonitorAction::GameExited
+    } else {
+        MonitorAction::NoChange
+    }
+}
+
+/// Initiates the background process monitor.
+///
+/// The process scan only executes when `auto_close` is enabled. When disabled,
+/// the thread sleeps at a reduced rate without incurring scan cost.
+///
+/// `game_was_running` is cleared atomically whenever `set_game_settings` disables
+/// `auto_close`, including fast disable/re-enable cycles that complete entirely
+/// within the 5-second sleep. The signal is written by the config path and read
+/// via `MonitorInvalidator` at the start of each enabled iteration.
+pub fn start_monitor<R: Runtime>(app: AppHandle<R>) {
+    log::info!("Starting game process monitor...");
+    let invalidator: Arc<_> = {
+        let state = app.state::<MonitorInvalidator>();
+        Arc::clone(&state.0)
+    };
+
+    thread::spawn(move || {
+        let mut sys = System::new();
+        let mut game_was_running = false;
+
+        loop {
+            let should_auto_close = {
+                let state = app.state::<ConfigState>();
+                state.0.lock().map(|c| c.auto_close).unwrap_or(false)
+            };
+
+            if should_auto_close {
+                sys.refresh_processes_specifics(
+                    ProcessesToUpdate::All,
+                    true,
+                    ProcessRefreshKind::nothing(),
+                );
+                let game_running = sys
+                    .processes()
+                    .values()
+                    .any(|p| p.name().to_str().map(is_game_process).unwrap_or(false));
+
+                match apply_monitor_tick(&mut game_was_running, game_running, &invalidator) {
+                    MonitorAction::GameDetected => {
+                        log::info!("Game process detected: {}", PROCESS_NAME_PART);
+                    }
+                    MonitorAction::GameExited => {
+                        log::info!("Game process exited.");
+                        log::info!("Auto-close enabled. Exiting application.");
+                        app.exit(0);
+                        break;
+                    }
+                    MonitorAction::NoChange => {}
+                }
+
+                thread::sleep(Duration::from_secs(5));
+            } else {
+                game_was_running = false;
+                thread::sleep(Duration::from_secs(30));
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::{apply_monitor_tick, is_game_process, MonitorAction};
@@ -173,103 +272,4 @@ mod tests {
         assert!(!gwr);
         assert!(matches!(action, MonitorAction::GameExited));
     }
-}
-
-/// Outcome of a single enabled monitor iteration.
-pub(crate) enum MonitorAction {
-    /// Game process newly observed for the first time.
-    GameDetected,
-    /// Game process was running and has now exited; application should exit.
-    GameExited,
-    /// No state change this iteration.
-    NoChange,
-}
-
-/// Applies invalidation and game-state tracking for one enabled monitor iteration.
-///
-/// Clears `game_was_running` if the invalidator flag was set (indicating `auto_close`
-/// was disabled since the previous scan), then derives the appropriate `MonitorAction`
-/// from the current `game_running` observation.
-pub(crate) fn apply_monitor_tick(
-    game_was_running: &mut bool,
-    game_running: bool,
-    invalidator: &Arc<AtomicBool>,
-) -> MonitorAction {
-    if invalidator.swap(false, Ordering::Relaxed) {
-        *game_was_running = false;
-    }
-
-    if game_running {
-        let first_detection = !*game_was_running;
-        *game_was_running = true;
-        if first_detection {
-            MonitorAction::GameDetected
-        } else {
-            MonitorAction::NoChange
-        }
-    } else if *game_was_running {
-        *game_was_running = false;
-        MonitorAction::GameExited
-    } else {
-        MonitorAction::NoChange
-    }
-}
-
-/// Initiates the background process monitor.
-///
-/// The process scan only executes when `auto_close` is enabled. When disabled,
-/// the thread sleeps at a reduced rate without incurring scan cost.
-///
-/// `game_was_running` is cleared atomically whenever `set_game_settings` disables
-/// `auto_close`, including fast disable/re-enable cycles that complete entirely
-/// within the 5-second sleep. The signal is written by the config path and read
-/// via `MonitorInvalidator` at the start of each enabled iteration.
-pub fn start_monitor<R: Runtime>(app: AppHandle<R>) {
-    log::info!("Starting game process monitor...");
-    let invalidator: Arc<_> = {
-        let state = app.state::<MonitorInvalidator>();
-        Arc::clone(&state.0)
-    };
-
-    thread::spawn(move || {
-        let mut sys = System::new();
-        let mut game_was_running = false;
-
-        loop {
-            let should_auto_close = {
-                let state = app.state::<ConfigState>();
-                state.0.lock().map(|c| c.auto_close).unwrap_or(false)
-            };
-
-            if should_auto_close {
-                sys.refresh_processes_specifics(
-                    ProcessesToUpdate::All,
-                    true,
-                    ProcessRefreshKind::nothing(),
-                );
-                let game_running = sys
-                    .processes()
-                    .values()
-                    .any(|p| p.name().to_str().map(is_game_process).unwrap_or(false));
-
-                match apply_monitor_tick(&mut game_was_running, game_running, &invalidator) {
-                    MonitorAction::GameDetected => {
-                        log::info!("Game process detected: {}", PROCESS_NAME_PART);
-                    }
-                    MonitorAction::GameExited => {
-                        log::info!("Game process exited.");
-                        log::info!("Auto-close enabled. Exiting application.");
-                        app.exit(0);
-                        break;
-                    }
-                    MonitorAction::NoChange => {}
-                }
-
-                thread::sleep(Duration::from_secs(5));
-            } else {
-                game_was_running = false;
-                thread::sleep(Duration::from_secs(30));
-            }
-        }
-    });
 }

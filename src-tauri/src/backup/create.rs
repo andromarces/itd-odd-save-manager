@@ -2,7 +2,10 @@ use super::cleanup::enforce_backup_limit;
 use super::common::HASH_FILE_NAME;
 use super::data::{build_save_paths, read_source_metadata, BackupInfo, SavePaths, SourceMetadata};
 use super::hashing::calculate_hash;
-use super::index::{BackupIndex, BackupStore, IndexEntry};
+#[cfg(test)]
+use super::index::BackupStore;
+use super::index::{BackupIndex, IndexEntry};
+#[cfg(test)]
 use super::listing::get_backups;
 use crate::filename_utils;
 use std::fs;
@@ -207,7 +210,7 @@ pub(crate) fn perform_backup_for_game_internal(
 }
 
 /// Backs up a specific game slot by directory and game number.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn perform_backup_for_game(
     save_dir: &Path,
     game_number: u32,
