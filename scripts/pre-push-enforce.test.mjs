@@ -81,7 +81,7 @@ describe("getAddedLines", () => {
     // Req: only genuinely added content is passed to secret-pattern detection.
     const diffOutput = "diff --git a/f b/f\n+++ b/f\n+secret=abc\n+normal line\n"; // noscan
     const run = vi.fn(() => ({ status: 0, stdout: diffOutput }));
-    expect(getAddedLines("@{upstream}", run)).toEqual(["+secret=abc", "+normal line"]);
+    expect(getAddedLines("@{upstream}", run)).toEqual(["+secret=abc", "+normal line"]); // noscan
   });
 });
 
@@ -176,7 +176,7 @@ describe("isSuppressed", () => {
 
   it("returns false for lines without the noscan marker", () => {
     // Req: ordinary lines without the marker remain subject to secret scanning.
-    expect(isSuppressed("+  password=supersecret")).toBe(false);
+    expect(isSuppressed("+  password=supersecret")).toBe(false); // noscan
     expect(isSuppressed("+  const x = 42;")).toBe(false);
   });
 
