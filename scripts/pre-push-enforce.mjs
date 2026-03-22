@@ -61,6 +61,36 @@ const SECRET_PATTERNS = [
 
 const NOSCAN_RE = /\bnoscan\b/i;
 
+/** Detects any eslint or oxlint disable directive in a JS/TS source line. */
+const JSTS_SUPPRESS_ANY_RE = /(eslint-disable|oxlint-disable)/;
+
+/**
+ * Matches the only allowed suppression form: a line comment scoped to the next or current
+ * line, followed by at least one explicit rule name.
+ */
+const JSTS_SUPPRESS_ALLOWED_RE = /\/\/\s*(eslint|oxlint)-disable-(next-line|line)\s+\S/;
+
+/**
+ * Matches JS/TS string literals so their content can be stripped before suppression
+ * scanning. Prevents false positives when directive keywords appear inside strings.
+ * Applied per-line; handles single-line double-quoted, single-quoted, and template literals.
+ */
+const STRING_LITERAL_RE = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g;
+
+/**
+ * Matches template literals across multiple lines for full-file preprocessing before
+ * per-line suppression scanning. Newlines inside the literal are preserved so that
+ * line numbers remain stable after blanking; all other interior characters are replaced
+ * with spaces.
+ */
+const MULTILINE_TEMPLATE_RE = /`(?:[^`\\]|\\.)*`/g;
+
+/** Detects Rust inner allow attributes that apply at crate or module scope. */
+const RUST_INNER_ALLOW_RE = /#!\[allow\(/;
+
+/** Detects Rust allow attributes for broad lint categories that policy prohibits. */
+const RUST_BROAD_ALLOW_RE = /#\[allow\(clippy::(all|restriction)\b/;
+
 const FORBIDDEN_NAMES = new Set([".env"]);
 const FORBIDDEN_PREFIX = ".env.";
 
@@ -265,6 +295,88 @@ export function isSuppressed(line) {
 }
 
 /**
+ * Scans changed JS/TS files for file-wide or block-wide lint suppression comments.
+ *
+ * Only line-scoped suppressions with an explicit rule name are accepted:
+ * `// eslint-disable-next-line rule` and `// eslint-disable-line rule`.
+ * Block-scope directives such as `/* eslint-disable rule *\/` are rejected
+ * even when a rule name is present.
+ *
+ * @param {string[]} files - File paths to inspect.
+ * @param {(path: string) => string} [readFile] - Injectable file reader.
+ * @returns {{ file: string, line: number, text: string }[]} Violations found.
+ */
+export function checkSuppressionComments(files, readFile = defaultReadFile) {
+  const violations = [];
+
+  for (const file of files) {
+    if (!JSTS_EXTENSIONS.has(path.extname(file).toLowerCase())) continue;
+
+    let content;
+    try {
+      content = readFile(file);
+    } catch {
+      continue;
+    }
+
+    const originalLines = content.split("\n");
+    // Blank multiline template literal bodies in the full content first so that
+    // directive-shaped text on interior lines does not trigger false positives.
+    // Non-newline characters are replaced with spaces to preserve line numbers.
+    const preprocessed = content.replace(
+      MULTILINE_TEMPLATE_RE,
+      (match) => "`" + match.slice(1, -1).replace(/[^\n]/g, " ") + "`",
+    );
+    const processedLines = preprocessed.split("\n");
+
+    for (let i = 0; i < processedLines.length; i++) {
+      const stripped = processedLines[i].replace(STRING_LITERAL_RE, '""');
+      if (JSTS_SUPPRESS_ANY_RE.test(stripped) && !JSTS_SUPPRESS_ALLOWED_RE.test(stripped)) {
+        violations.push({ file, line: i + 1, text: originalLines[i].trim() });
+      }
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Scans changed Rust files for crate/module-wide or broad lint suppression attributes.
+ *
+ * Rejects inner attributes (`#![allow(...)]`) and overly broad categories such as
+ * `clippy::all` and `clippy::restriction`. The preferred suppression form is
+ * `#[expect(rule, reason = "...")]` on the specific item.
+ *
+ * @param {string[]} files - Rust file paths to inspect.
+ * @param {(path: string) => string} [readFile] - Injectable file reader.
+ * @returns {{ file: string, line: number, text: string }[]} Violations found.
+ */
+export function checkRustSuppressions(files, readFile = defaultReadFile) {
+  const violations = [];
+
+  for (const file of files) {
+    if (path.extname(file).toLowerCase() !== RUST_EXT) continue;
+
+    let content;
+    try {
+      content = readFile(file);
+    } catch {
+      continue;
+    }
+
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (RUST_INNER_ALLOW_RE.test(line) || RUST_BROAD_ALLOW_RE.test(line)) {
+        violations.push({ file, line: i + 1, text: line.trim() });
+      }
+    }
+  }
+
+  return violations;
+}
+
+/**
  * Scans changed JS/TS and Rust files for named functions or public Rust functions
  * that lack a preceding documentation comment.
  *
@@ -355,10 +467,14 @@ export function checkRustfmt(files, run = spawnSync) {
  * @returns {number} Process exit code.
  */
 export function checkOxlint(files, run = spawnSync) {
-  const result = run("oxlint", files, {
-    stdio: "inherit",
-    ...SHELL_ON_WIN,
-  });
+  const result = run(
+    "oxlint",
+    ["--config", ".oxlintrc.json", "--report-unused-disable-directives", ...files],
+    {
+      stdio: "inherit",
+      ...SHELL_ON_WIN,
+    },
+  );
   return typeof result.status === "number" ? result.status : 1;
 }
 
@@ -371,11 +487,25 @@ export function checkOxlint(files, run = spawnSync) {
  */
 export function checkCargoClippy(run = spawnSync, log = console.log) {
   log("Rust files changed. Running cargo clippy in src-tauri/...");
-  const result = run("cargo", ["clippy", "--all-targets", "--", "-D", "warnings"], {
-    stdio: "inherit",
-    cwd: "src-tauri",
-    ...SHELL_ON_WIN,
-  });
+  const result = run(
+    "cargo",
+    [
+      "clippy",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings",
+      "-W",
+      "clippy::allow_attributes",
+      "-W",
+      "clippy::allow_attributes_without_reason",
+    ],
+    {
+      stdio: "inherit",
+      cwd: "src-tauri",
+      ...SHELL_ON_WIN,
+    },
+  );
   return typeof result.status === "number" ? result.status : 1;
 }
 
@@ -432,25 +562,38 @@ export function runEnforce({
     return 1;
   }
 
-  // Step 4: oxfmt format check on changed supported files
+  // Step 4: Suppression scan on changed JS/TS and Rust files
+  const suppressionViolations = [
+    ...checkSuppressionComments(jsTs, readFile),
+    ...checkRustSuppressions(rust, readFile),
+  ];
+  if (suppressionViolations.length > 0) {
+    error(
+      "Broad lint suppression comments are prohibited (use line-scoped forms with explicit rule names):",
+    );
+    for (const v of suppressionViolations) error(`  ${v.file}:${v.line}: ${v.text}`);
+    return 1;
+  }
+
+  // Step 5: oxfmt format check on changed supported files
   if (oxfmt.length > 0) {
     const code = checkOxfmt(oxfmt, { run, log, error });
     if (code !== 0) return code;
   }
 
-  // Step 5: Rust format check on changed .rs files
+  // Step 6: Rust format check on changed .rs files
   if (rust.length > 0) {
     const code = checkRustfmt(rust, run);
     if (code !== 0) return code;
   }
 
-  // Step 6: oxlint on changed JS/TS/framework files
+  // Step 7: oxlint on changed JS/TS/framework files
   if (jsTs.length > 0) {
     const code = checkOxlint(jsTs, run);
     if (code !== 0) return code;
   }
 
-  // Step 7: Doc comment heuristic on changed JS/TS and Rust files
+  // Step 8: Doc comment heuristic on changed JS/TS and Rust files
   const docViolations = findMissingDocComments([...jsTs, ...rust], readFile);
   if (docViolations.length > 0) {
     error("Missing documentation comments:");
@@ -458,7 +601,7 @@ export function runEnforce({
     return 1;
   }
 
-  // Step 8: Cargo clippy (only when Rust files changed)
+  // Step 9: Cargo clippy (only when Rust files changed)
   if (rust.length > 0) {
     const code = checkCargoClippy(run, log);
     if (code !== 0) return code;

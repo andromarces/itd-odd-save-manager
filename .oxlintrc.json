@@ -1,6 +1,7 @@
 {
-  "plugins": ["jsdoc"],
+  "plugins": ["jsdoc", "unicorn"],
   "rules": {
-    "no-debugger": "error"
+    "no-debugger": "error",
+    "unicorn/no-abusive-eslint-disable": "error"
   }
 }

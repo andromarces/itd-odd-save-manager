@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   checkForbiddenPaths,
   checkGitignoreSanity,
+  checkRustSuppressions,
+  checkSuppressionComments,
   classifyFiles,
   findMissingDocComments,
   getAddedLines,
@@ -237,6 +239,117 @@ describe("findMissingDocComments", () => {
   });
 });
 
+describe("checkSuppressionComments", () => {
+  it("accepts a line-scoped eslint-disable-next-line with an explicit rule", () => {
+    // Req: single-line suppressions naming a specific rule satisfy the narrow-suppression policy.
+    const content = "// eslint-disable-next-line no-console\nconsole.log('x');\n";
+    expect(checkSuppressionComments(["src/a.ts"], () => content)).toEqual([]);
+  });
+
+  it("accepts a line-scoped eslint-disable-line with an explicit rule", () => {
+    // Req: inline suppressions naming a specific rule satisfy the narrow-suppression policy.
+    const content = "console.log('x'); // eslint-disable-line no-console\n";
+    expect(checkSuppressionComments(["src/a.ts"], () => content)).toEqual([]);
+  });
+
+  it("accepts an oxlint-disable-next-line with an explicit rule", () => {
+    // Req: oxlint-disable-next-line with an explicit rule satisfies the narrow-suppression policy.
+    const content = "// oxlint-disable-next-line no-console\nconsole.log('x');\n";
+    expect(checkSuppressionComments(["src/a.ts"], () => content)).toEqual([]);
+  });
+
+  it("rejects a file-wide eslint-disable with no rule name", () => {
+    // Req: blanket disable comments with no rule name are broader than policy permits.
+    const content = "/* eslint-disable */\nconsole.log('x');\n";
+    const violations = checkSuppressionComments(["src/a.ts"], () => content);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ file: "src/a.ts", line: 1 });
+  });
+
+  it("rejects a block-scoped eslint-disable even when a rule name is present", () => {
+    // Req: block-scope disable is broader than line-scope and is prohibited even with an explicit rule.
+    const content = "/* eslint-disable no-console */\nconsole.log('x');\n";
+    const violations = checkSuppressionComments(["src/a.ts"], () => content);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ file: "src/a.ts", line: 1 });
+  });
+
+  it("rejects an eslint-disable-next-line with no rule name", () => {
+    // Req: line-scoped suppressions without an explicit rule name are not sufficiently narrow.
+    const content = "// eslint-disable-next-line\nconsole.log('x');\n";
+    const violations = checkSuppressionComments(["src/a.ts"], () => content);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ file: "src/a.ts", line: 1 });
+  });
+
+  it("rejects a block-scoped oxlint-disable even when a rule name is present", () => {
+    // Req: oxlint-disable block directives are subject to the same scope policy as eslint-disable.
+    const content = "/* oxlint-disable no-console */\nconsole.log('x');\n";
+    const violations = checkSuppressionComments(["src/a.ts"], () => content);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ file: "src/a.ts", line: 1 });
+  });
+
+  it("does not flag directive keywords that appear inside string literals", () => {
+    // Req: string content is not a suppression comment; flagging it would cause false positives
+    //      when test fixtures or documentation strings contain directive-shaped text.
+    const content = 'const msg = "/* eslint-disable no-console */";\n';
+    expect(checkSuppressionComments(["src/a.ts"], () => content)).toEqual([]);
+  });
+
+  it("does not flag directive keywords inside a multiline template literal", () => {
+    // Req: template literal content spanning multiple lines is not a suppression comment;
+    //      flagging it would cause false positives when multiline test fixtures contain
+    //      directive-shaped text on intermediate lines.
+    const content = "const s = `first line\neslint-disable-next-line no-console\nthird`;\n";
+    expect(checkSuppressionComments(["src/a.ts"], () => content)).toEqual([]);
+  });
+
+  it("skips non-JS/TS files", () => {
+    // Req: suppression scan applies only to JS/TS/framework files, not prose or config files.
+    const content = "/* eslint-disable no-console */\n";
+    expect(checkSuppressionComments(["README.md"], () => content)).toEqual([]);
+  });
+});
+
+describe("checkRustSuppressions", () => {
+  it("rejects an inner allow attribute applied at crate or module scope", () => {
+    // Req: #![allow(...)] applies to the entire module or crate and violates the narrow-suppression policy.
+    const content = "#![allow(dead_code)]\npub fn foo() {}\n";
+    const violations = checkRustSuppressions(["src/lib.rs"], () => content);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ file: "src/lib.rs", line: 1 });
+  });
+
+  it("rejects #[allow(clippy::all)] as an overly broad category", () => {
+    // Req: blanket Clippy category suppressions mask too many warnings to be acceptable.
+    const content = "#[allow(clippy::all)]\npub fn foo() {}\n";
+    const violations = checkRustSuppressions(["src/lib.rs"], () => content);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ file: "src/lib.rs", line: 1 });
+  });
+
+  it("rejects #[allow(clippy::restriction)] as an overly broad category", () => {
+    // Req: the restriction lint group covers many rules and is too coarse for policy compliance.
+    const content = "#[allow(clippy::restriction)]\npub fn foo() {}\n";
+    const violations = checkRustSuppressions(["src/lib.rs"], () => content);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ file: "src/lib.rs", line: 1 });
+  });
+
+  it("does not reject a narrow item-level #[expect] with a reason", () => {
+    // Req: #[expect(rule, reason = "...")] is the preferred suppression form and must not be flagged.
+    const content = '#[expect(dead_code, reason = "used only in tests")]\npub fn foo() {}\n';
+    expect(checkRustSuppressions(["src/lib.rs"], () => content)).toEqual([]);
+  });
+
+  it("skips non-Rust files", () => {
+    // Req: Rust suppression scan applies only to .rs files.
+    const content = "#![allow(dead_code)]\n";
+    expect(checkRustSuppressions(["src/a.ts"], () => content)).toEqual([]);
+  });
+});
+
 describe("runEnforce", () => {
   it("exits with 0 and logs a skip message when no upstream base can be resolved", () => {
     // Req: pre-push is skipped rather than failing when git base resolution yields no result.
@@ -273,6 +386,48 @@ describe("runEnforce", () => {
     const readFile = vi.fn(() => ".env\n.env.*\n");
 
     expect(runEnforce({ run, log: vi.fn(), error: vi.fn(), readFile })).toBe(0);
+  });
+
+  it("returns 1 on a rejected JS/TS suppression comment before format and lint tools run", () => {
+    // Req: a broad suppression directive in a changed JS/TS file is caught in step 4 and blocks
+    //      the push before the slower oxfmt and oxlint tools are invoked.
+    const run = vi
+      .fn()
+      .mockReturnValueOnce({ status: 0 }) // resolveBase
+      .mockReturnValueOnce({ status: 0, stdout: "src/a.ts\n" }) // getChangedFiles
+      .mockReturnValueOnce({ status: 0, stdout: "" }); // getAddedLines: no secrets
+    const readFile = vi
+      .fn()
+      .mockReturnValueOnce(".env\n.env.*\n") // checkGitignoreSanity
+      .mockReturnValueOnce("/* eslint-disable no-console */\n"); // checkSuppressionComments: src/a.ts
+    const error = vi.fn();
+
+    const exitCode = runEnforce({ run, log: vi.fn(), error, readFile });
+
+    expect(exitCode).toBe(1);
+    expect(run).toHaveBeenCalledTimes(3); // no oxfmt or oxlint invocations
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("suppression"));
+  });
+
+  it("returns 1 on a crate-wide Rust allow attribute before cargo clippy runs", () => {
+    // Req: an inner #![allow(...)] in a changed Rust file is caught in step 4, preventing
+    //      the slower cargo clippy run from executing.
+    const run = vi
+      .fn()
+      .mockReturnValueOnce({ status: 0 }) // resolveBase
+      .mockReturnValueOnce({ status: 0, stdout: "src-tauri/src/lib.rs\n" }) // getChangedFiles
+      .mockReturnValueOnce({ status: 0, stdout: "" }); // getAddedLines: no secrets
+    const readFile = vi
+      .fn()
+      .mockReturnValueOnce(".env\n.env.*\n") // checkGitignoreSanity
+      .mockReturnValueOnce("#![allow(dead_code)]\npub fn foo() {}\n"); // checkRustSuppressions: lib.rs
+    const error = vi.fn();
+
+    const exitCode = runEnforce({ run, log: vi.fn(), error, readFile });
+
+    expect(exitCode).toBe(1);
+    expect(run).toHaveBeenCalledTimes(3); // no rustfmt or clippy invocations
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("suppression"));
   });
 
   it("does not block a push when a secret-pattern line carries the noscan marker", () => {
