@@ -27,7 +27,7 @@
     "@vitest/coverage-v8": "^4.1.0",
     "husky": "^9.1.7",
     "jsdom": "^28.1.0",
-    "lint-staged": "^16.3.3",
+    "lint-staged": "^16.4.0",
     "oxfmt": "^0.39.0",
     "oxlint": "^1.54.0",
     "typescript": "~5.9.3",
