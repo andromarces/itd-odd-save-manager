@@ -59,6 +59,8 @@ const SECRET_PATTERNS = [
   /-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----/,
 ];
 
+const NOSCAN_RE = /\bnoscan\b/i;
+
 const FORBIDDEN_NAMES = new Set([".env"]);
 const FORBIDDEN_PREFIX = ".env.";
 
@@ -249,6 +251,20 @@ export function hasSecretPattern(line) {
 }
 
 /**
+ * Returns whether an added diff line carries a noscan suppression marker.
+ *
+ * Lines marked with the word "noscan" (case-insensitive, as a whole word) are
+ * excluded from secret-pattern scanning. Use this for test fixtures or other
+ * lines that intentionally contain credential-shaped strings.
+ *
+ * @param {string} line - A single added line from a unified diff.
+ * @returns {boolean} True when the line should be excluded from secret scanning.
+ */
+export function isSuppressed(line) {
+  return NOSCAN_RE.test(line);
+}
+
+/**
  * Scans changed JS/TS and Rust files for named functions or public Rust functions
  * that lack a preceding documentation comment.
  *
@@ -407,7 +423,9 @@ export function runEnforce({
   }
 
   // Step 3: Secrets heuristic on added lines
-  const secretLines = getAddedLines(base, run).filter(hasSecretPattern);
+  const secretLines = getAddedLines(base, run).filter(
+    (line) => hasSecretPattern(line) && !isSuppressed(line),
+  );
   if (secretLines.length > 0) {
     error("Potential secrets detected in added lines:");
     for (const line of secretLines) error(`  ${line}`);

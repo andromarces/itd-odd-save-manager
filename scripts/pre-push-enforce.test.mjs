@@ -9,6 +9,7 @@ import {
   getChangedFiles,
   hasSecretPattern,
   isForbiddenPath,
+  isSuppressed,
   resolveBase,
   runEnforce,
 } from "./pre-push-enforce.mjs";
@@ -78,7 +79,7 @@ describe("getChangedFiles", () => {
 describe("getAddedLines", () => {
   it("extracts lines starting with '+' while excluding diff headers", () => {
     // Req: only genuinely added content is passed to secret-pattern detection.
-    const diffOutput = "diff --git a/f b/f\n+++ b/f\n+secret=abc\n+normal line\n";
+    const diffOutput = "diff --git a/f b/f\n+++ b/f\n+secret=abc\n+normal line\n"; // noscan
     const run = vi.fn(() => ({ status: 0, stdout: diffOutput }));
     expect(getAddedLines("@{upstream}", run)).toEqual(["+secret=abc", "+normal line"]);
   });
@@ -144,10 +145,10 @@ describe("checkGitignoreSanity", () => {
 describe("hasSecretPattern", () => {
   it("detects credential assignments in added lines", () => {
     // Req: common secret assignment patterns in added code are flagged before push.
-    expect(hasSecretPattern("+  password=supersecret")).toBe(true);
-    expect(hasSecretPattern("+  api_key=xyz123abc")).toBe(true);
-    expect(hasSecretPattern("+  TOKEN=Bearer abc123")).toBe(true);
-    expect(hasSecretPattern("+  secret=my-secret-value")).toBe(true);
+    expect(hasSecretPattern("+  password=supersecret")).toBe(true); // noscan
+    expect(hasSecretPattern("+  api_key=xyz123abc")).toBe(true); // noscan
+    expect(hasSecretPattern("+  TOKEN=Bearer abc123")).toBe(true); // noscan
+    expect(hasSecretPattern("+  secret=my-secret-value")).toBe(true); // noscan
   });
 
   it("does not flag ordinary code or log lines", () => {
@@ -162,6 +163,26 @@ describe("hasSecretPattern", () => {
     expect(hasSecretPattern("+  const token = getToken()")).toBe(false);
     expect(hasSecretPattern("+  const secret = computeSecret(x)")).toBe(false);
     expect(hasSecretPattern("+  const token = response.token")).toBe(false);
+  });
+});
+
+describe("isSuppressed", () => {
+  it("returns true when the line contains the noscan marker as a whole word", () => {
+    // Req: lines carrying the noscan marker are excluded from secret-pattern scanning.
+    expect(isSuppressed("+  password=supersecret // noscan")).toBe(true);
+    expect(isSuppressed("+  api_key=xyz # noscan")).toBe(true);
+    expect(isSuppressed("+  secret=val // NOSCAN")).toBe(true);
+  });
+
+  it("returns false for lines without the noscan marker", () => {
+    // Req: ordinary lines without the marker remain subject to secret scanning.
+    expect(isSuppressed("+  password=supersecret")).toBe(false);
+    expect(isSuppressed("+  const x = 42;")).toBe(false);
+  });
+
+  it("does not treat partial word matches as suppression markers", () => {
+    // Req: the marker must appear as a whole word to avoid accidental suppression on unrelated identifiers.
+    expect(isSuppressed("+  const noscanResult = true;")).toBe(false);
   });
 });
 
@@ -249,6 +270,18 @@ describe("runEnforce", () => {
       .mockReturnValueOnce({ status: 0 }) // resolveBase
       .mockReturnValueOnce({ status: 0, stdout: "" }) // getChangedFiles: no files
       .mockReturnValueOnce({ status: 0, stdout: "" }); // getAddedLines: no added lines
+    const readFile = vi.fn(() => ".env\n.env.*\n");
+
+    expect(runEnforce({ run, log: vi.fn(), error: vi.fn(), readFile })).toBe(0);
+  });
+
+  it("does not block a push when a secret-pattern line carries the noscan marker", () => {
+    // Req: intentionally suppressed lines must not cause false-positive push rejections.
+    const run = vi
+      .fn()
+      .mockReturnValueOnce({ status: 0 }) // resolveBase
+      .mockReturnValueOnce({ status: 0, stdout: "" }) // getChangedFiles: no files
+      .mockReturnValueOnce({ status: 0, stdout: "+password=supersecret // noscan\n" }); // getAddedLines
     const readFile = vi.fn(() => ".env\n.env.*\n");
 
     expect(runEnforce({ run, log: vi.fn(), error: vi.fn(), readFile })).toBe(0);
