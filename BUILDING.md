@@ -44,12 +44,45 @@ Runs [lint-staged](https://github.com/lint-staged/lint-staged) against staged fi
 
 ### pre-push
 
-Runs against files changed between the local branch and its upstream (`@{upstream}...HEAD`):
+Runs `scripts/pre-push-enforce.mjs` against files changed between the resolved base and HEAD.
+The diff base is resolved as follows: `@{upstream}` when configured, otherwise the merge-base
+against `origin/main` or `origin/master`, and skipped entirely when neither is reachable.
 
-- **JS/TS/framework files** (`**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx,vue,svelte,astro}`): linted with `oxlint` across the entire repository. Framework files (`.vue`, `.svelte`, `.astro`) are linted through their script blocks.
-- **Rust files**: `cargo clippy -- -D warnings` runs in `src-tauri/` when at least one `.rs` file changed.
+Checks execute in fail-fast order — the first failure stops all subsequent checks:
 
-When no upstream branch is configured (e.g., on the first push of a new branch), the hook uses `git merge-base HEAD origin/main` (or `origin/master`) as the base, so only the branch's own commits are linted. If neither remote default branch is reachable, pre-push linting is skipped entirely.
+1. **Forbidden paths**: rejects `.env` and `.env.*` files.
+2. **Gitignore sanity**: verifies `.gitignore` contains both `.env` and `.env.*` entries.
+3. **Secret heuristic**: scans added diff lines for credential assignment patterns
+   (`password=`, `api_key=`, `private_key=`, `token=` / `secret=` when the value is not a
+   function call or property access, PEM private key headers). Anonymous callbacks, property
+   reads, and function return values are excluded to reduce false positives.
+4. **oxfmt format check**: checks changed files supported by oxfmt
+   (`*.{css,html,json,json5,jsonc,js,jsx,md,mdx,ts,tsx,toml,vue,yaml,yml}`).
+5. **Rust format check**: checks changed `.rs` files with `rustfmt --check --edition 2021`.
+6. **oxlint**: lints changed JS/TS/framework files using `.oxlintrc.json`
+   (`no-debugger` enforced; jsdoc plugin loaded for future rule expansion).
+7. **Doc comment heuristic**: flags named JS/TS function declarations, exported const
+   arrow functions, and Rust `pub fn` declarations that lack a preceding documentation comment.
+   Class methods and private Rust functions are out of scope (high false-positive risk without
+   an AST parser) and remain manual-review only.
+8. **Cargo clippy**: runs `cargo clippy --all-targets -- -D warnings` in `src-tauri/` when
+   at least one `.rs` file changed.
+
+**Automated enforcement coverage:**
+
+| Check                                                                | Automated                                                   |
+| -------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Formatting (JS/TS/markup/config/Rust)                                | Yes                                                         |
+| Lint correctness (JS/TS/framework)                                   | Yes                                                         |
+| Rust lint (when Rust changed)                                        | Yes                                                         |
+| .env committed                                                       | Yes                                                         |
+| .gitignore protection                                                | Yes                                                         |
+| Obvious secret leakage                                               | Yes (heuristic; excludes function calls and property reads) |
+| Doc comment presence (named functions, exported arrows, Rust pub fn) | Yes (heuristic)                                             |
+| Doc comment presence (class methods, private Rust fn)                | Manual review only                                          |
+| KISS / YAGNI / DRY / SOLID                                           | Manual review only                                          |
+| TDD discipline / test organization                                   | Manual review only                                          |
+| Logging completeness                                                 | Manual review only                                          |
 
 3. **Build Frontend**
 

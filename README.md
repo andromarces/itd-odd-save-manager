@@ -70,7 +70,7 @@ Windows only.
 
 1. Clone the repository.
 2. Run `npm install` to install dependencies and configure git hooks.
-   - This project uses a `pre-commit` hook to format tracked non-Rust files with `oxfmt` and Rust files with `rustfmt`.
+   - This project uses a `pre-commit` hook (format-only) and a `pre-push` hook (diff-scoped, fail-fast policy enforcement). See [BUILDING.md](BUILDING.md) for details.
 
 ### Build
 
