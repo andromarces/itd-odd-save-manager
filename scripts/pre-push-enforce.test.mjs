@@ -310,6 +310,21 @@ describe("checkSuppressionComments", () => {
     const content = "/* eslint-disable no-console */\n";
     expect(checkSuppressionComments(["README.md"], () => content)).toEqual([]);
   });
+
+  it("does not flag directive keywords inside a regex literal", () => {
+    // Req: regex literals are not suppression comments; flagging them causes false positives
+    //      when the scanner's own pattern definitions contain directive-shaped text.
+    const content = "const re = /(eslint-disable|oxlint-disable)/;\n";
+    expect(checkSuppressionComments(["src/a.ts"], () => content)).toEqual([]);
+  });
+
+  it("does not flag directive keywords mentioned mid-sentence in a prose comment", () => {
+    // Req: prose comments that reference directive names for documentation purposes are not
+    //      suppression directives and must not be flagged.
+    const content =
+      "// Note: oxlint-disable-next-line with an explicit rule is the allowed form.\n";
+    expect(checkSuppressionComments(["src/a.ts"], () => content)).toEqual([]);
+  });
 });
 
 describe("checkRustSuppressions", () => {

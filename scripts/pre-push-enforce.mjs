@@ -61,8 +61,21 @@ const SECRET_PATTERNS = [
 
 const NOSCAN_RE = /\bnoscan\b/i;
 
-/** Detects any eslint or oxlint disable directive in a JS/TS source line. */
-const JSTS_SUPPRESS_ANY_RE = /(eslint-disable|oxlint-disable)/;
+/**
+ * Detects a lint suppression directive inside a block comment on the same line.
+ * Matches the opening delimiter followed by any non-closing content that contains the
+ * directive keyword, so that only real block-comment suppressions are flagged. Regex
+ * literals and prose line comments are not matched.
+ */
+const JSTS_BLOCK_SUPPRESS_RE = /\/\*(?:[^*]|\*(?!\/))*(?:eslint-disable|oxlint-disable)/;
+
+/**
+ * Detects a lint suppression directive at the start of a line comment.
+ * Requires the directive keyword to immediately follow "//" and optional whitespace,
+ * preventing prose comments that mention directive names mid-sentence from triggering
+ * false positives.
+ */
+const JSTS_LINE_SUPPRESS_RE = /\/\/\s*(?:eslint-disable|oxlint-disable)/;
 
 /**
  * Matches the only allowed suppression form: a line comment scoped to the next or current
@@ -331,7 +344,10 @@ export function checkSuppressionComments(files, readFile = defaultReadFile) {
 
     for (let i = 0; i < processedLines.length; i++) {
       const stripped = processedLines[i].replace(STRING_LITERAL_RE, '""');
-      if (JSTS_SUPPRESS_ANY_RE.test(stripped) && !JSTS_SUPPRESS_ALLOWED_RE.test(stripped)) {
+      if (
+        (JSTS_BLOCK_SUPPRESS_RE.test(stripped) || JSTS_LINE_SUPPRESS_RE.test(stripped)) &&
+        !JSTS_SUPPRESS_ALLOWED_RE.test(stripped)
+      ) {
         violations.push({ file, line: i + 1, text: originalLines[i].trim() });
       }
     }
