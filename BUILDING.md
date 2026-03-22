@@ -53,7 +53,7 @@ Checks execute in fail-fast order — the first failure stops all subsequent che
 1. **Forbidden paths**: rejects `.env` and `.env.*` files.
 2. **Gitignore sanity**: verifies `.gitignore` contains both `.env` and `.env.*` entries.
 3. **Secret heuristic**: scans added diff lines for credential assignment patterns
-   (`password=`, `api_key=`, `private_key=`, `token=` / `secret=` when the value is not a
+   (`password=`, `api_key=`, `private_key=`, `token=` / `secret=` when the value is not a <!-- noscan -->
    function call or property access, PEM private key headers). Anonymous callbacks, property
    reads, and function return values are excluded to reduce false positives.
 4. **oxfmt format check**: checks changed files supported by oxfmt
