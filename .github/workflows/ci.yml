@@ -75,3 +75,15 @@ jobs:
         run: npm run format:oxfmt:check
       - name: Build frontend
         run: npm run build
+
+  ci-success:
+    name: ci-success
+    needs: [rust-tests, frontend-build]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            exit 1
+          fi
