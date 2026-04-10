@@ -8,6 +8,7 @@ mod tests {
     use crate::backup::common::{BACKUP_DIR_NAME, INDEX_FILE_NAME};
     use crate::backup::create::perform_backup_for_game;
     use crate::backup::data::{build_save_paths, BackupInfo};
+    use crate::backup::hashing::calculate_hash;
     use crate::backup::index::BackupStore;
     use crate::backup::listing::{backup_info_from_folder, get_backups};
     use crate::backup::notes::{set_backup_lock, set_backup_note};
@@ -148,6 +149,26 @@ mod tests {
 
         let content_bak = fs::read_to_string(&bak_sav).unwrap();
         assert_eq!(content_bak.trim(), "original bak");
+    }
+
+    /// Tests that the hash file contains only the hex digest.
+    #[test]
+    fn test_calculate_hash_matches_expected_sha256_hex() {
+        let dir = tempdir().unwrap();
+        let save_file = dir.path().join("gamesave_5.sav");
+
+        {
+            let mut file = File::create(&save_file).unwrap();
+            writeln!(file, "hash test").unwrap();
+        }
+
+        // Usefulness: verifies exact lowercase SHA-256 encoding, which the .hash smoke test does not cover.
+        let hash = calculate_hash(&save_file).unwrap();
+
+        assert_eq!(
+            hash,
+            "fd639c4f698a01e97e017cf701b32785c779872121290dd61836b302b2eb618b"
+        );
     }
 
     /// Tests that the hash file contains only the hex digest.
