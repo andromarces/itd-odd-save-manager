@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 const GIT_COMMAND = process.platform === "win32" ? "git.exe" : "git";
 const RUST_EXTENSION = ".rs";
 const OXFMT_ENTRYPOINT = path.resolve("node_modules", "oxfmt", "bin", "oxfmt");
+// Candidate lists routinely contain paths oxfmt cannot format (lockfiles, images, TOML).
+// Without this flag oxfmt exits 2 when none of the supplied paths is a formattable target.
+// known-limit: also suppresses errors for paths that do not exist; supplied paths come from
+// git or lint-staged, so they are known to exist.
+const OXFMT_UNMATCHED_PATTERN_FLAG = "--no-error-on-unmatched-pattern";
 
 /**
  * Splits NUL-delimited git output into individual file paths.
@@ -105,9 +110,11 @@ export function runOxfmt(argv, dependencies = {}) {
       return 0;
     }
 
-    const result = run(process.execPath, [OXFMT_ENTRYPOINT, ...oxfmtArgs, ...targetFiles], {
-      stdio: "inherit",
-    });
+    const result = run(
+      process.execPath,
+      [OXFMT_ENTRYPOINT, OXFMT_UNMATCHED_PATTERN_FLAG, ...oxfmtArgs, ...targetFiles],
+      { stdio: "inherit" },
+    );
 
     if (result.error) {
       throw result.error;

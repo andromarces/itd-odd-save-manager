@@ -54,7 +54,12 @@ describe("runOxfmt", () => {
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith(
       process.execPath,
-      [expect.stringContaining("node_modules"), "--check", "README.md"],
+      [
+        expect.stringContaining("node_modules"),
+        "--no-error-on-unmatched-pattern",
+        "--check",
+        "README.md",
+      ],
       { stdio: "inherit" },
     );
   });
@@ -84,7 +89,34 @@ describe("runOxfmt", () => {
     expect(run).toHaveBeenNthCalledWith(
       2,
       process.execPath,
-      [expect.stringContaining("node_modules"), "--list-different", "README.md", "package.json"],
+      [
+        expect.stringContaining("node_modules"),
+        "--no-error-on-unmatched-pattern",
+        "--list-different",
+        "README.md",
+        "package.json",
+      ],
+      { stdio: "inherit" },
+    );
+  });
+
+  it("tolerates file lists that contain no formattable targets", () => {
+    const run = vi.fn(() => ({ status: 0 }));
+
+    const exitCode = runOxfmt(["src-tauri/Cargo.lock"], {
+      run,
+      log: vi.fn(),
+      error: vi.fn(),
+    });
+
+    expect(exitCode).toBe(0);
+    expect(run).toHaveBeenCalledWith(
+      process.execPath,
+      [
+        expect.stringContaining("node_modules"),
+        "--no-error-on-unmatched-pattern",
+        "src-tauri/Cargo.lock",
+      ],
       { stdio: "inherit" },
     );
   });
