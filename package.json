@@ -23,7 +23,7 @@
     "@tauri-apps/api": "^2.11.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
+    "@tauri-apps/cli": "^2.11.5",
     "@vitest/coverage-v8": "^4.1.10",
     "husky": "^9.1.7",
     "jsdom": "^30.0.1",
