@@ -8,7 +8,7 @@ This document outlines how to build the ITD ODD Save Manager from source. The pr
 
 - **Git**: For version control.
 - **Node.js**: Version 20 (LTS).
-- **Rust**: Version 1.93.0 (managed via `rust-toolchain.toml`).
+- **Rust**: Minimum supported version 1.95.0. The build toolchain is pinned to 1.99.0 in `rust-toolchain.toml`, and `rustup` installs it automatically on the first build.
 
 ### Windows
 
