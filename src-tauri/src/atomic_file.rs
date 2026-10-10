@@ -208,7 +208,10 @@ mod tests {
 
         let result = write_atomic::<Value>(&path, br#"{"a":2}"#);
 
-        #[allow(clippy::permissions_set_readonly_false)]
+        #[expect(
+            clippy::permissions_set_readonly_false,
+            reason = "test cleanup restores write access before assertions; Windows-only path"
+        )]
         perms.set_readonly(false);
         fs::set_permissions(&path, perms).unwrap();
         assert!(result.is_err());
