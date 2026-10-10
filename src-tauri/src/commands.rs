@@ -359,6 +359,9 @@ mod tests {
         use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
         const RESTORED_FILE: &str = "gamesave_0.sav";
+        const ROOT_BYTES: &[u8] = b"root";
+        const BACKUP_BYTES: &[u8] = b"backup";
+        const OUTSIDE_BYTES: &[u8] = b"outside";
 
         struct Fixture {
             _temp_dir: tempfile::TempDir,
@@ -376,9 +379,14 @@ mod tests {
             let outside = temp_dir.path().join("outside").join(VALID_FOLDER);
             fs::create_dir_all(&backup).expect("failed to create backup dir");
             fs::create_dir_all(&outside).expect("failed to create outside dir");
-            // Save files in every candidate folder make a bypassed restore guard observable.
-            for dir in [&backup_root, &backup, &outside] {
-                fs::write(dir.join(RESTORED_FILE), b"data").expect("failed to write save file");
+            // Distinct save files in every candidate folder make a bypassed restore guard
+            // observable, and show which folder a restore copied from.
+            for (dir, bytes) in [
+                (&backup_root, ROOT_BYTES),
+                (&backup, BACKUP_BYTES),
+                (&outside, OUTSIDE_BYTES),
+            ] {
+                fs::write(dir.join(RESTORED_FILE), bytes).expect("failed to write save file");
             }
             Fixture {
                 _temp_dir: temp_dir,
@@ -504,15 +512,31 @@ mod tests {
             }
         }
 
-        /// Restores `backup_path` into `save_path` and reports whether the save file arrived. The
-        /// file is removed afterwards so cases stay independent.
-        fn restore_copies_file(fx: &Fixture, save_path: &Path, backup_path: &Path) -> bool {
+        /// Asserts that restore succeeds and the destination holds the backup bytes.
+        fn assert_restore_accepted(fx: &Fixture, save_path: &Path, backup_path: &Path, case: &str) {
             let target = fx.save_path.join(RESTORED_FILE);
             let _ = fs::remove_file(&target);
-            let restored = backup::restore_backup(backup_path, save_path).is_ok();
+            let result = backup::restore_backup(backup_path, save_path);
+            let contents = fs::read(&target);
+            let _ = fs::remove_file(&target);
+            result.unwrap_or_else(|e| panic!("{case}: restore failed: {e}"));
+            assert_eq!(
+                contents.unwrap_or_default(),
+                BACKUP_BYTES,
+                "{case}: destination does not hold the backup bytes"
+            );
+        }
+
+        /// Asserts that restore returns an error and, independently, that no file was copied,
+        /// so a guard that copies before failing is caught.
+        fn assert_restore_rejected(fx: &Fixture, save_path: &Path, backup_path: &Path, case: &str) {
+            let target = fx.save_path.join(RESTORED_FILE);
+            let _ = fs::remove_file(&target);
+            let result = backup::restore_backup(backup_path, save_path);
             let copied = target.exists();
             let _ = fs::remove_file(&target);
-            restored && copied
+            assert!(result.is_err(), "{case}: restore returned success");
+            assert!(!copied, "{case}: a file was copied before rejection");
         }
 
         /// Verifies that restore (through `validate_backup_source`) accepts a valid backup folder
@@ -527,9 +551,11 @@ mod tests {
                     ("both", form(&fx.save_path), form(&fx.backup)),
                 ];
                 for (side, save_path, backup_path) in cases {
-                    assert!(
-                        restore_copies_file(&fx, &save_path, &backup_path),
-                        "{name} on {side} was not restored"
+                    assert_restore_accepted(
+                        &fx,
+                        &save_path,
+                        &backup_path,
+                        &format!("{name} on {side}"),
                     );
                 }
             }
@@ -547,9 +573,11 @@ mod tests {
                         (form(&fx.save_path), form(target)),
                     ];
                     for (save_path, backup_path) in cases {
-                        assert!(
-                            !restore_copies_file(&fx, &save_path, &backup_path),
-                            "{name} form of {label} was restored"
+                        assert_restore_rejected(
+                            &fx,
+                            &save_path,
+                            &backup_path,
+                            &format!("{name} form of {label}"),
                         );
                     }
                 }
@@ -581,7 +609,7 @@ mod tests {
                     verify_backup_path(save_path, backup_path).expect("short form rejected"),
                     expected
                 );
-                assert!(restore_copies_file(&fx, save_path, backup_path));
+                assert_restore_accepted(&fx, save_path, backup_path, "short-name form");
             }
             for (save_path, backup_path) in [
                 (&fx.save_path, &short_root),
@@ -590,7 +618,7 @@ mod tests {
                 (&short_save, &short_outside),
             ] {
                 assert!(verify_backup_path(save_path, backup_path).is_err());
-                assert!(!restore_copies_file(&fx, save_path, backup_path));
+                assert_restore_rejected(&fx, save_path, backup_path, "short-name form");
             }
         }
     }
