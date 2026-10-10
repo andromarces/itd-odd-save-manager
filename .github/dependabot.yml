@@ -20,15 +20,17 @@ updates:
     schedule:
       interval: daily
     groups:
-      vitest:
+      vite-plus:
         patterns:
+          - vite-plus
+          - vite
+          - "@voidzero-dev/vite-plus-*"
           - vitest
-          - "@vitest/coverage-v8"
           - "@vitest/*"
+          - oxlint
       ox-tooling:
         patterns:
           - oxfmt
-          - oxlint
     open-pull-requests-limit: 10
     rebase-strategy: auto
 
