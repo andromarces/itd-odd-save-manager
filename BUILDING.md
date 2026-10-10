@@ -8,6 +8,7 @@ This document outlines how to build the ITD ODD Save Manager from source. The pr
 
 - **Git**: For version control.
 - **Node.js**: Version 26 for CI and release builds (the version is set in `.nvmrc`). Local development also works on Node.js 24.15.0 or a later 24.x release. Node.js 25 is not supported.
+  - `nvm-windows` users (checked on 2.0.1-hotfix.1): plain `nvm use` does not read `.nvmrc`. Run `nvm install 26` and `nvm use 26`. The [nvm-windows documentation](https://docs.nvm-windows.com/features/modes) states that shim mode (`nvm use shim`) selects the version from `.nvmrc` automatically. That behavior is not tested, and `nvm use shim` changes the global operating mode of the machine.
 - **pnpm**: The exact version in the `packageManager` field of `package.json` (12.10.1). Install it with the [standalone installer](https://pnpm.io/installation). Corepack is not used.
 - **Rust**: Minimum supported version 1.95.0. The build toolchain is pinned to 1.99.0 in `rust-toolchain.toml`, and `rustup` installs it automatically on the first build.
 
