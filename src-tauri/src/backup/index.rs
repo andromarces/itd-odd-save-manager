@@ -1,5 +1,6 @@
 use super::common::{BACKUP_DIR_NAME, INDEX_FILE_NAME};
 use super::data::SourceMetadata;
+use crate::atomic_file::{load_json, write_atomic};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -83,22 +84,64 @@ impl BackupStore {
 }
 
 /// Loads the backup index from the given backup root directory.
-/// Returns a default index if the file is missing or invalid.
+/// Returns a default index if the file is missing or damaged. A damaged file is logged at error
+/// level and left in place. The next save preserves it before replacing it (see `write_atomic`).
 pub(crate) fn load_index(backup_root: &Path) -> BackupIndex {
-    let index_path = backup_root.join(INDEX_FILE_NAME);
-    if index_path.exists() {
-        if let Ok(content) = fs::read_to_string(&index_path) {
-            if let Ok(index) = serde_json::from_str(&content) {
-                return index;
-            }
-        }
-    }
-    BackupIndex::default()
+    load_json(&backup_root.join(INDEX_FILE_NAME), "Backup index").unwrap_or_default()
 }
 
-/// Saves the given index to the backup root directory.
+/// Saves the given index to the backup root directory using an atomic write.
 pub(crate) fn save_index(backup_root: &Path, index: &BackupIndex) -> Result<(), String> {
     let index_path = backup_root.join(INDEX_FILE_NAME);
     let content = serde_json::to_string(index).map_err(|e| e.to_string())?;
-    fs::write(index_path, content).map_err(|e| e.to_string())
+    write_atomic::<BackupIndex>(&index_path, content.as_bytes()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Verifies a saved index loads back unchanged.
+    #[test]
+    fn test_index_round_trip() {
+        let dir = tempdir().unwrap();
+        let mut index = BackupIndex::default();
+        index.notes.insert("folder".to_string(), "note".to_string());
+        save_index(dir.path(), &index).unwrap();
+
+        let loaded = load_index(dir.path());
+        assert_eq!(loaded.notes.get("folder").map(String::as_str), Some("note"));
+        assert!(!dir.path().join("index.json.tmp").exists());
+    }
+
+    /// Verifies a missing index loads as empty and creates no quarantine file.
+    #[test]
+    fn test_load_index_missing() {
+        let dir = tempdir().unwrap();
+        let loaded = load_index(dir.path());
+        assert!(loaded.games.is_empty() && loaded.notes.is_empty());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    /// Verifies a corrupt index loads empty, and a later save preserves the damaged bytes.
+    #[test]
+    fn test_load_index_corrupt_is_preserved_on_save() {
+        let dir = tempdir().unwrap();
+        let index_path = dir.path().join(INDEX_FILE_NAME);
+        fs::write(&index_path, b"{\"games\": {").unwrap();
+
+        let loaded = load_index(dir.path());
+        assert!(loaded.games.is_empty() && loaded.notes.is_empty());
+        assert_eq!(fs::read(&index_path).unwrap(), b"{\"games\": {");
+
+        save_index(dir.path(), &loaded).unwrap();
+        let preserved: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p != &index_path)
+            .collect();
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(fs::read(&preserved[0]).unwrap(), b"{\"games\": {");
+    }
 }
