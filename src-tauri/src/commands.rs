@@ -1,3 +1,4 @@
+use crate::backup::common::BACKUP_DIR_NAME;
 use crate::backup::index::BackupStore;
 use crate::backup::{self, BackupInfo};
 use crate::config::ConfigState;
@@ -28,9 +29,13 @@ where
         .map_err(|e| format!("Blocking task join error: {}", e))?
 }
 
-/// Verifies that a backup path is valid and within the allowed backup directory.
+/// Verifies that a backup path is a canonical direct child of the `.backups` root.
+///
+/// Rejects the root itself, nested descendants, paths outside the root (including symlink
+/// escapes, because the path is canonicalized first), and folder names that do not match
+/// the backup folder naming contract.
 fn verify_backup_path(save_path: &Path, backup_path: &Path) -> Result<PathBuf, String> {
-    let backup_root = save_path.join(".backups");
+    let backup_root = save_path.join(BACKUP_DIR_NAME);
     let canonical_target = backup_path
         .canonicalize()
         .map_err(|_| "Invalid backup path".to_string())?;
@@ -38,8 +43,18 @@ fn verify_backup_path(save_path: &Path, backup_path: &Path) -> Result<PathBuf, S
         .canonicalize()
         .map_err(|_| "Backup directory not found".to_string())?;
 
-    if !canonical_target.starts_with(&canonical_root) {
-        return Err("Security violation: Path is outside the backup directory".to_string());
+    if canonical_target.parent() != Some(canonical_root.as_path()) {
+        return Err(
+            "Security violation: Path is not a backup folder in the backup directory".to_string(),
+        );
+    }
+
+    let folder_name = canonical_target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Invalid backup folder name".to_string())?;
+    if crate::filename_utils::parse_backup_folder_name(folder_name).is_none() {
+        return Err("Invalid backup folder name".to_string());
     }
 
     Ok(canonical_target)
@@ -55,17 +70,19 @@ pub async fn get_backups_command(state: State<'_, ConfigState>) -> Result<Vec<Ba
     }
 }
 
-/// Tauri command to restore a specific backup to a target location.
+/// Tauri command to restore a specific backup to the configured save directory.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn restore_backup_command(
+    state: State<'_, ConfigState>,
     backup_path: String,
-    target_path: String,
 ) -> Result<(), String> {
-    let backup = PathBuf::from(backup_path);
-    let target = PathBuf::from(target_path);
-
-    let target_dir = crate::filename_utils::normalize_to_directory(&target)
-        .map_err(|_| "Invalid target path".to_string())?;
+    let save_path =
+        extract_save_path(&state)?.ok_or_else(|| "Save path not configured".to_string())?;
+    let backup = verify_backup_path(&save_path, Path::new(&backup_path))?;
+    // Canonical form keeps the `.backups` containment check in the restore index update consistent.
+    let target_dir = save_path
+        .canonicalize()
+        .map_err(|_| "Invalid save path".to_string())?;
 
     run_blocking(move || backup::restore_backup(&backup, &target_dir)).await
 }
@@ -198,14 +215,128 @@ mod tests {
         );
     }
 
+    const VALID_FOLDER: &str = "Game 1 - 01-Jan-2024 10-00-00 AM";
+
+    /// Creates a directory link: a symlink, or on Windows a junction when symlinks are denied.
+    /// Returns false when the platform denies both. CI always sets `CI`, and a denied link there
+    /// fails the test instead of skipping it.
+    fn try_link_dir(original: &Path, link: &Path) -> bool {
+        #[cfg(unix)]
+        let created = std::os::unix::fs::symlink(original, link).is_ok();
+        #[cfg(windows)]
+        let created = std::os::windows::fs::symlink_dir(original, link).is_ok()
+            || std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(original)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+        if !created {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "directory link creation must work on CI"
+            );
+            eprintln!("SKIPPED: directory link creation denied on this machine; CI runs this test");
+        }
+        created
+    }
+
+    /// Verifies that the backup root, nested descendants, and malformed folder names are rejected.
+    #[test]
+    fn test_verify_backup_path_rejects_root_nested_and_malformed() {
+        use std::fs;
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let save_path = temp_dir.path().join("saves");
+        let backup_root = save_path.join(BACKUP_DIR_NAME);
+        let nested = backup_root.join(VALID_FOLDER).join("child");
+        let malformed = backup_root.join("not-a-backup");
+
+        fs::create_dir_all(&nested).expect("failed to create nested dir");
+        fs::create_dir_all(&malformed).expect("failed to create malformed dir");
+
+        assert!(verify_backup_path(&save_path, &backup_root).is_err());
+        assert!(verify_backup_path(&save_path, &nested).is_err());
+        assert!(verify_backup_path(&save_path, &malformed).is_err());
+        assert!(verify_backup_path(&save_path, &save_path).is_err());
+    }
+
+    /// Verifies that a link inside the backup root that points outside it is rejected by the
+    /// containment guard alone: the link target carries a valid backup folder name.
+    #[test]
+    fn test_verify_backup_path_rejects_symlink_escape() {
+        use std::fs;
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let save_path = temp_dir.path().join("saves");
+        let backup_root = save_path.join(BACKUP_DIR_NAME);
+        let outside = temp_dir.path().join("outside").join(VALID_FOLDER);
+        fs::create_dir_all(&backup_root).expect("failed to create backup root");
+        fs::create_dir_all(&outside).expect("failed to create outside dir");
+
+        let link = backup_root.join(VALID_FOLDER);
+        if !try_link_dir(&outside, &link) {
+            return;
+        }
+
+        let err = verify_backup_path(&save_path, &link).expect_err("escape must be rejected");
+        assert!(
+            err.contains("Security violation"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Verifies that a linked `.backups` root is accepted by validation and restore alike, so the
+    /// up-front guard and the index update agree.
+    #[test]
+    fn test_symlinked_backup_root_validates_and_restores() {
+        use std::fs;
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let save_path = temp_dir.path().join("saves");
+        let real_root = temp_dir.path().join("real_backups");
+        let folder = real_root.join(VALID_FOLDER);
+        fs::create_dir_all(&save_path).expect("failed to create save dir");
+        fs::create_dir_all(&folder).expect("failed to create backup folder");
+        fs::write(folder.join("gamesave_0.sav"), b"data").expect("failed to write backup save");
+
+        if !try_link_dir(&real_root, &save_path.join(BACKUP_DIR_NAME)) {
+            return;
+        }
+
+        let verified = verify_backup_path(
+            &save_path,
+            &save_path.join(BACKUP_DIR_NAME).join(VALID_FOLDER),
+        )
+        .expect("linked root must validate");
+        let target = save_path
+            .canonicalize()
+            .expect("failed to canonicalize save dir");
+        backup::restore_backup(&verified, &target).expect("restore must succeed");
+        assert!(save_path.join("gamesave_0.sav").exists());
+    }
+
+    /// Verifies that restore rejects a source outside the backup root before copying any file.
+    #[test]
+    fn test_restore_rejects_outside_source_before_copy() {
+        use std::fs;
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let save_path = temp_dir.path().join("saves");
+        let outside = temp_dir.path().join("outside").join(VALID_FOLDER);
+        fs::create_dir_all(save_path.join(BACKUP_DIR_NAME)).expect("failed to create backup root");
+        fs::create_dir_all(&outside).expect("failed to create outside dir");
+        fs::write(outside.join("gamesave_0.sav"), b"data").expect("failed to write save");
+
+        assert!(backup::restore_backup(&outside, &save_path).is_err());
+        assert!(!save_path.join("gamesave_0.sav").exists());
+    }
+
     /// Verifies the security logic of the verify_backup_path helper.
     #[test]
     fn test_verify_backup_path_security() {
         use std::fs;
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let save_path = temp_dir.path().join("saves");
-        let backup_root = save_path.join(".backups");
-        let game_backup = backup_root.join("Game 1 - 2024-01-01");
+        let backup_root = save_path.join(BACKUP_DIR_NAME);
+        let game_backup = backup_root.join(VALID_FOLDER);
 
         fs::create_dir_all(&game_backup).expect("failed to create mock backup dir");
 
