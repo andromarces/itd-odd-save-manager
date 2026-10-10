@@ -1,6 +1,10 @@
 use tauri::{AppHandle, Manager, Runtime};
 
 /// Helper to show and focus the main window.
+///
+/// `_from_second_instance` drives the "already running" notification on Linux and is
+/// intentionally unused on other targets. The underscore prefix avoids an unused-parameter
+/// warning there.
 pub fn show_main_window<R: Runtime>(app: &AppHandle<R>, _from_second_instance: bool) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
