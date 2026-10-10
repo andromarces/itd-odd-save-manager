@@ -350,4 +350,276 @@ mod tests {
         fs::File::create(&other).expect("failed to create mock unauthorized file");
         assert!(verify_backup_path(&save_path, &other).is_err());
     }
+
+    /// Windows path forms that reach `verify_backup_path` from the frontend and the config.
+    #[cfg(windows)]
+    mod windows_path_forms {
+        use super::*;
+        use std::fs;
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+        const RESTORED_FILE: &str = "gamesave_0.sav";
+        const ROOT_BYTES: &[u8] = b"root";
+        const BACKUP_BYTES: &[u8] = b"backup";
+        const OUTSIDE_BYTES: &[u8] = b"outside";
+
+        struct Fixture {
+            _temp_dir: tempfile::TempDir,
+            save_path: PathBuf,
+            backup_root: PathBuf,
+            backup: PathBuf,
+            outside: PathBuf,
+        }
+
+        fn fixture() -> Fixture {
+            let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+            let save_path = temp_dir.path().join("saves");
+            let backup_root = save_path.join(BACKUP_DIR_NAME);
+            let backup = backup_root.join(VALID_FOLDER);
+            let outside = temp_dir.path().join("outside").join(VALID_FOLDER);
+            fs::create_dir_all(&backup).expect("failed to create backup dir");
+            fs::create_dir_all(&outside).expect("failed to create outside dir");
+            // Distinct save files in every candidate folder make a bypassed restore guard
+            // observable, and show which folder a restore copied from.
+            for (dir, bytes) in [
+                (&backup_root, ROOT_BYTES),
+                (&backup, BACKUP_BYTES),
+                (&outside, OUTSIDE_BYTES),
+            ] {
+                fs::write(dir.join(RESTORED_FILE), bytes).expect("failed to write save file");
+            }
+            Fixture {
+                _temp_dir: temp_dir,
+                save_path,
+                backup_root,
+                backup,
+                outside,
+            }
+        }
+
+        fn flip_drive_case(path: &Path) -> PathBuf {
+            let text = path.to_str().expect("temp path must be UTF-8");
+            let mut chars = text.chars();
+            let drive = chars.next().expect("path must not be empty");
+            let flipped = if drive.is_ascii_uppercase() {
+                drive.to_ascii_lowercase()
+            } else {
+                drive.to_ascii_uppercase()
+            };
+            PathBuf::from(format!("{flipped}{}", chars.as_str()))
+        }
+
+        fn forward_slashes(path: &Path) -> PathBuf {
+            PathBuf::from(
+                path.to_str()
+                    .expect("temp path must be UTF-8")
+                    .replace('\\', "/"),
+            )
+        }
+
+        fn trailing_separator(path: &Path) -> PathBuf {
+            let mut text = path.as_os_str().to_owned();
+            text.push("\\");
+            PathBuf::from(text)
+        }
+
+        fn verbatim(path: &Path) -> PathBuf {
+            let canonical = path.canonicalize().expect("failed to canonicalize path");
+            assert!(canonical.to_string_lossy().starts_with(r"\\?\"));
+            canonical
+        }
+
+        /// Returns the 8.3 form of an existing path, or `None` when the volume generates no
+        /// short name for it. Panics when `GetShortPathNameW` fails, so an API error never reads
+        /// as a missing alias.
+        fn short_form(path: &Path) -> Option<PathBuf> {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GetShortPathNameW(long: *const u16, short: *mut u16, len: u32) -> u32;
+            }
+            let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+            let mut buf = vec![0u16; 1024];
+            let written = loop {
+                // SAFETY: `wide` is NUL-terminated and `buf` is writable for `buf.len()` units.
+                let written =
+                    unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) }
+                        as usize;
+                if written == 0 {
+                    panic!(
+                        "GetShortPathNameW failed for {path:?}: {}",
+                        std::io::Error::last_os_error()
+                    );
+                }
+                // A result above the buffer length is the required size, NUL included.
+                if written <= buf.len() {
+                    break written;
+                }
+                buf.resize(written, 0);
+            };
+            let short = PathBuf::from(std::ffi::OsString::from_wide(&buf[..written]));
+            let unchanged = short
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&path.to_string_lossy());
+            (!unchanged).then_some(short)
+        }
+
+        type Form = fn(&Path) -> PathBuf;
+        const FORMS: [(&str, Form); 4] = [
+            ("drive-letter case", flip_drive_case),
+            ("forward slashes", forward_slashes),
+            ("trailing separator", trailing_separator),
+            ("verbatim", verbatim),
+        ];
+
+        /// Verifies that a valid backup folder is accepted in every Windows path form, whether the
+        /// form applies to the backup path, the configured save path, or both.
+        #[test]
+        fn test_verify_backup_path_accepts_windows_forms_of_valid_backup() {
+            let fx = fixture();
+            let expected = fx.backup.canonicalize().expect("failed to canonicalize");
+            for (name, form) in FORMS {
+                let cases = [
+                    ("backup path", fx.save_path.clone(), form(&fx.backup)),
+                    ("save path", form(&fx.save_path), fx.backup.clone()),
+                    ("both", form(&fx.save_path), form(&fx.backup)),
+                ];
+                for (side, save_path, backup_path) in cases {
+                    let verified = verify_backup_path(&save_path, &backup_path)
+                        .unwrap_or_else(|e| panic!("{name} on {side} rejected: {e}"));
+                    assert_eq!(verified, expected, "{name} on {side}");
+                }
+            }
+        }
+
+        /// Verifies that the backup root and a path outside it stay rejected in every Windows
+        /// path form, so no form defeats the containment check.
+        #[test]
+        fn test_verify_backup_path_rejects_windows_forms_of_root_and_outside() {
+            let fx = fixture();
+            for (name, form) in FORMS {
+                for (label, target) in [("root", &fx.backup_root), ("outside", &fx.outside)] {
+                    let cases = [
+                        (fx.save_path.clone(), form(target)),
+                        (form(&fx.save_path), form(target)),
+                    ];
+                    for (save_path, backup_path) in cases {
+                        assert!(
+                            verify_backup_path(&save_path, &backup_path).is_err(),
+                            "{name} form of {label} was accepted"
+                        );
+                    }
+                }
+            }
+        }
+
+        /// Asserts that restore succeeds and the destination holds the backup bytes.
+        fn assert_restore_accepted(fx: &Fixture, save_path: &Path, backup_path: &Path, case: &str) {
+            let target = fx.save_path.join(RESTORED_FILE);
+            let _ = fs::remove_file(&target);
+            let result = backup::restore_backup(backup_path, save_path);
+            let contents = fs::read(&target);
+            let _ = fs::remove_file(&target);
+            result.unwrap_or_else(|e| panic!("{case}: restore failed: {e}"));
+            assert_eq!(
+                contents.unwrap_or_default(),
+                BACKUP_BYTES,
+                "{case}: destination does not hold the backup bytes"
+            );
+        }
+
+        /// Asserts that restore returns an error and, independently, that no file was copied,
+        /// so a guard that copies before failing is caught.
+        fn assert_restore_rejected(fx: &Fixture, save_path: &Path, backup_path: &Path, case: &str) {
+            let target = fx.save_path.join(RESTORED_FILE);
+            let _ = fs::remove_file(&target);
+            let result = backup::restore_backup(backup_path, save_path);
+            let copied = target.exists();
+            let _ = fs::remove_file(&target);
+            assert!(result.is_err(), "{case}: restore returned success");
+            assert!(!copied, "{case}: a file was copied before rejection");
+        }
+
+        /// Verifies that restore (through `validate_backup_source`) accepts a valid backup folder
+        /// in every Windows path form.
+        #[test]
+        fn test_restore_accepts_windows_forms_of_valid_backup() {
+            let fx = fixture();
+            for (name, form) in FORMS {
+                let cases = [
+                    ("backup path", fx.save_path.clone(), form(&fx.backup)),
+                    ("save path", form(&fx.save_path), fx.backup.clone()),
+                    ("both", form(&fx.save_path), form(&fx.backup)),
+                ];
+                for (side, save_path, backup_path) in cases {
+                    assert_restore_accepted(
+                        &fx,
+                        &save_path,
+                        &backup_path,
+                        &format!("{name} on {side}"),
+                    );
+                }
+            }
+        }
+
+        /// Verifies that restore rejects the backup root and a path outside it in every Windows
+        /// path form, and copies nothing.
+        #[test]
+        fn test_restore_rejects_windows_forms_of_root_and_outside() {
+            let fx = fixture();
+            for (name, form) in FORMS {
+                for (label, target) in [("root", &fx.backup_root), ("outside", &fx.outside)] {
+                    let cases = [
+                        (fx.save_path.clone(), form(target)),
+                        (form(&fx.save_path), form(target)),
+                    ];
+                    for (save_path, backup_path) in cases {
+                        assert_restore_rejected(
+                            &fx,
+                            &save_path,
+                            &backup_path,
+                            &format!("{name} form of {label}"),
+                        );
+                    }
+                }
+            }
+        }
+
+        /// Verifies the 8.3 short-name forms of the save path and backup folder are accepted and
+        /// the short-name forms of the root and an outside path are rejected, by both
+        /// `verify_backup_path` and restore. Skips only when the call succeeds and the volume made
+        /// no short name for the backup folder; an API failure panics.
+        #[test]
+        fn test_short_name_forms_are_contained() {
+            let fx = fixture();
+            let Some(short_backup) = short_form(&fx.backup) else {
+                eprintln!("SKIPPED: volume generates no 8.3 short name for the backup folder");
+                return;
+            };
+            let short_save = short_form(&fx.save_path).unwrap_or_else(|| fx.save_path.clone());
+            let short_root = short_form(&fx.backup_root).expect("root short name missing");
+            let short_outside = short_form(&fx.outside).expect("outside short name missing");
+            let expected = fx.backup.canonicalize().expect("failed to canonicalize");
+
+            for (save_path, backup_path) in [
+                (&short_save, &fx.backup),
+                (&fx.save_path, &short_backup),
+                (&short_save, &short_backup),
+            ] {
+                assert_eq!(
+                    verify_backup_path(save_path, backup_path).expect("short form rejected"),
+                    expected
+                );
+                assert_restore_accepted(&fx, save_path, backup_path, "short-name form");
+            }
+            for (save_path, backup_path) in [
+                (&fx.save_path, &short_root),
+                (&short_save, &short_root),
+                (&fx.save_path, &short_outside),
+                (&short_save, &short_outside),
+            ] {
+                assert!(verify_backup_path(save_path, backup_path).is_err());
+                assert_restore_rejected(&fx, save_path, backup_path, "short-name form");
+            }
+        }
+    }
 }
