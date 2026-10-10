@@ -1,5 +1,5 @@
 use super::common::{BACKUP_DIR_NAME, INDEX_FILE_NAME};
-use crate::atomic_file::{quarantine_corrupt, write_atomic};
+use crate::atomic_file::{load_json, write_atomic};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -70,35 +70,10 @@ impl BackupStore {
 }
 
 /// Loads the backup index from the given backup root directory.
-/// Returns a default index if the file is missing, unreadable, or invalid.
-/// A file that fails to parse is moved aside (see `quarantine_corrupt`) and logged at error level.
+/// Returns a default index if the file is missing or damaged. A damaged file is logged at error
+/// level and preserved (see `load_json`).
 pub(crate) fn load_index(backup_root: &Path) -> BackupIndex {
-    let index_path = backup_root.join(INDEX_FILE_NAME);
-    let content = match fs::read_to_string(&index_path) {
-        Ok(content) => content,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log::info!(
-                "Backup index not found at {:?}, using empty index",
-                index_path
-            );
-            return BackupIndex::default();
-        }
-        Err(e) => {
-            log::error!("Failed to read backup index {:?}: {}", index_path, e);
-            return BackupIndex::default();
-        }
-    };
-    match serde_json::from_str(&content) {
-        Ok(index) => index,
-        Err(e) => {
-            log::error!("Failed to parse backup index {:?}: {}", index_path, e);
-            match quarantine_corrupt(&index_path) {
-                Ok(moved) => log::error!("Corrupt backup index preserved at: {:?}", moved),
-                Err(re) => log::error!("Failed to preserve corrupt backup index: {}", re),
-            }
-            BackupIndex::default()
-        }
-    }
+    load_json(&backup_root.join(INDEX_FILE_NAME), "Backup index").unwrap_or_default()
 }
 
 /// Saves the given index to the backup root directory using an atomic write.

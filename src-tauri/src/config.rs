@@ -1,10 +1,9 @@
 // ITD ODD Save Manager by andromarces
 
-use crate::atomic_file::{quarantine_corrupt, write_atomic};
+use crate::atomic_file::{load_json, write_atomic};
 use crate::watcher::FileWatcher;
 use crate::MonitorInvalidator;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
@@ -68,27 +67,13 @@ fn config_path_for_exe(exe_path: &Path) -> PathBuf {
 /// Loads configuration from a specific file path.
 pub fn load_config_from_path(path: &Path) -> AppConfig {
     log::info!("Loading configuration from: {:?}", path);
-    if path.exists() {
-        match fs::read_to_string(path) {
-            Ok(content) => match serde_json::from_str(&content) {
-                Ok(config) => {
-                    log::info!("Configuration loaded successfully");
-                    return config;
-                }
-                Err(e) => {
-                    log::error!("Failed to parse configuration: {}", e);
-                    match quarantine_corrupt(path) {
-                        Ok(moved) => log::error!("Corrupt configuration preserved at: {:?}", moved),
-                        Err(re) => log::error!("Failed to preserve corrupt configuration: {}", re),
-                    }
-                }
-            },
-            Err(e) => log::error!("Failed to read configuration file: {}", e),
+    match load_json(path, "Configuration") {
+        Some(config) => {
+            log::info!("Configuration loaded successfully");
+            config
         }
-    } else {
-        log::info!("Configuration file not found, using defaults");
+        None => AppConfig::default(),
     }
-    AppConfig::default()
 }
 
 /// Validates if the provided string is a valid path (file or directory).
@@ -423,6 +408,7 @@ pub(crate) fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::fs::File;
     use std::sync::Mutex;
     use tempfile::tempdir;
