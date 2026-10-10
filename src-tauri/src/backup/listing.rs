@@ -86,10 +86,7 @@ pub(crate) fn backup_info_from_folder(
         path: path.to_string_lossy().to_string(),
         filename: folder_name.to_string(),
         original_filename: main_filename.clone(),
-        original_path: save_dir
-            .join(format!("gamesave_{}.sav", info.game_number))
-            .to_string_lossy()
-            .to_string(),
+        original_path: save_dir.join(&main_filename).to_string_lossy().to_string(),
         size,
         modified: info.timestamp.to_rfc3339(),
         game_number: info.game_number,

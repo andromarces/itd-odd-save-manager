@@ -83,13 +83,13 @@ pub fn delete_backups_batch(
 }
 
 /// Enforces the backup limit for a specific game, pruning the index for any deleted backups.
+/// A `limit` of 0 means no limit: nothing is deleted.
 pub(crate) fn enforce_backup_limit(
     game_number: u32,
     limit: usize,
     all_backups: &[BackupInfo],
     index: &mut BackupIndex,
 ) -> Result<(), String> {
-    // 0 means no limit
     if limit == 0 {
         return Ok(());
     }
@@ -101,7 +101,7 @@ pub(crate) fn enforce_backup_limit(
         .collect::<Vec<_>>();
 
     if game_backups.len() >= limit {
-        let keep_count = if limit > 0 { limit - 1 } else { 0 };
+        let keep_count = limit - 1;
 
         if game_backups.len() > keep_count {
             let to_delete = game_backups.split_off(keep_count);
