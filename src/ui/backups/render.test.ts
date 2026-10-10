@@ -41,6 +41,19 @@ describe("createBackupRow", () => {
     const cellWithDate = cells.find((cell) => cell.textContent === formattedDate);
     expect(cellWithDate).toBeDefined();
   });
+
+  /**
+   * Verifies the lock button label follows the lock state while the other action labels stay fixed.
+   * Not redundant: the createActionButton refactor collapsed two label parameters into one, and no
+   * other test covers the Lock/Unlock switch.
+   */
+  it("labels the lock button by lock state and keeps the other action labels", () => {
+    const labels = (backup: BackupInfo) =>
+      Array.from(createBackupRow(backup).querySelectorAll("button")).map((b) => b.textContent);
+
+    expect(labels(createBackup({ locked: false }))).toEqual(["Restore", "Lock", "Note", "Delete"]);
+    expect(labels(createBackup({ locked: true }))).toEqual(["Restore", "Unlock", "Note", "Delete"]);
+  });
 });
 
 describe("createNoteRow", () => {

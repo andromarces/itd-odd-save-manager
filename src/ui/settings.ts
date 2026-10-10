@@ -11,42 +11,28 @@ export interface SettingsFeature {
 }
 
 /**
-
  * Sets up the game launcher and settings feature.
-
  */
-
 export function setupSettingsFeature(elements: SettingsElements): SettingsFeature {
   /**
-
    * Saves game settings (auto launch and auto close).
-
    */
-
   async function saveGameSettings(): Promise<void> {
     const autoLaunch = elements.autoLaunchCheck.checked;
-
     const autoClose = elements.autoCloseCheck.checked;
 
     const rawMax = parseInt(elements.maxBackupsInput.value, 10);
-
     const maxBackups = isNaN(rawMax) ? 100 : Math.max(0, rawMax);
-
     elements.maxBackupsInput.value = String(maxBackups);
 
     await invokeAction(
       "set_game_settings",
-
       {
         auto_launch_game: autoLaunch,
-
         auto_close: autoClose,
-
         max_backups_per_game: maxBackups,
       },
-
       "save game settings",
-
       {
         successLog: `Updated game settings: Auto-Launch=${autoLaunch}, Auto-Close=${autoClose}, Max-Backups=${maxBackups}`,
       },
@@ -54,94 +40,56 @@ export function setupSettingsFeature(elements: SettingsElements): SettingsFeatur
   }
 
   /**
-
    * Launches the game via the backend command.
-
    */
-
   async function launchGame(): Promise<void> {
     logActivity("Launching game...");
 
     await invokeAction("launch_game", undefined, "launch game", {
       successLog: "Game launch command sent.",
-
       alertOnError: true,
     });
   }
 
   /**
-
    * Handles the launch game button click.
-
    */
-
   function handleLaunchGameClick(): void {
     void launchGame();
   }
 
   /**
-
    * Handles the auto launch setting change.
-
    */
-
   function handleAutoLaunchChange(): void {
     void saveGameSettings();
   }
 
   /**
-
    * Handles the auto close setting change.
-
    */
-
   function handleAutoCloseChange(): void {
     void saveGameSettings();
   }
 
   /**
-
    * Handles the max backups setting change.
-
    */
-
   function handleMaxBackupsChange(): void {
     void saveGameSettings();
   }
 
   elements.launchGameButton.addEventListener("click", handleLaunchGameClick);
-
   elements.autoLaunchCheck.addEventListener("change", handleAutoLaunchChange);
-
   elements.autoCloseCheck.addEventListener("change", handleAutoCloseChange);
-
   elements.maxBackupsInput.addEventListener("change", handleMaxBackupsChange);
 
   return {
     destroy: () => {
-      elements.launchGameButton.removeEventListener(
-        "click",
-
-        handleLaunchGameClick,
-      );
-
-      elements.autoLaunchCheck.removeEventListener(
-        "change",
-
-        handleAutoLaunchChange,
-      );
-
-      elements.autoCloseCheck.removeEventListener(
-        "change",
-
-        handleAutoCloseChange,
-      );
-
-      elements.maxBackupsInput.removeEventListener(
-        "change",
-
-        handleMaxBackupsChange,
-      );
+      elements.launchGameButton.removeEventListener("click", handleLaunchGameClick);
+      elements.autoLaunchCheck.removeEventListener("change", handleAutoLaunchChange);
+      elements.autoCloseCheck.removeEventListener("change", handleAutoCloseChange);
+      elements.maxBackupsInput.removeEventListener("change", handleMaxBackupsChange);
     },
   };
 }
