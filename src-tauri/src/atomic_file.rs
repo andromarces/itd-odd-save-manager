@@ -194,6 +194,28 @@ mod tests {
         assert_eq!(dir_entries(dir.path()), vec![path]);
     }
 
+    /// Verifies a rename that fails after the temporary file exists removes it and keeps the target.
+    /// Windows refuses to rename over a read-only file, so this runs in the `rust-tests (windows-2022)` CI job.
+    #[cfg(windows)]
+    #[test]
+    fn test_write_atomic_late_failure_removes_temp_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("data.json");
+        fs::write(&path, br#"{"a":1}"#).unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&path, perms.clone()).unwrap();
+
+        let result = write_atomic::<Value>(&path, br#"{"a":2}"#);
+
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        fs::set_permissions(&path, perms).unwrap();
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), br#"{"a":1}"#);
+        assert_eq!(dir_entries(dir.path()), vec![path]);
+    }
+
     /// Verifies temporary names never collide.
     #[test]
     fn test_temp_names_are_unique() {
