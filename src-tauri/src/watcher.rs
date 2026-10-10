@@ -154,9 +154,12 @@ fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: us
     if let Ok(backup_root) = ensure_backup_root(save_dir) {
         let mut index = load_index(&backup_root);
 
+        // One enumeration for the whole batch. Each game only reads and prunes its own
+        // backups, so the shared list stays valid across iterations.
+        let backups =
+            crate::backup::get_backups_for_games(save_dir, true, game_numbers).unwrap_or_default();
+
         for &game_number in game_numbers {
-            let backups =
-                crate::backup::get_backups(save_dir, true, Some(game_number)).unwrap_or_default();
             match perform_backup_for_game_internal(
                 save_dir,
                 &backup_root,
