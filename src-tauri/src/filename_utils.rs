@@ -83,11 +83,7 @@ pub fn parse_path(path: &Path) -> Option<SaveFileInfo> {
 ///
 /// * `Result<PathBuf, String>` - The normalized directory path.
 pub fn normalize_to_directory(path: &Path) -> Result<PathBuf, String> {
-    if path.is_file() {
-        path.parent()
-            .map(|p| p.to_path_buf())
-            .ok_or_else(|| "Invalid file path: has no parent".to_string())
-    } else if !path.exists() && path.extension().is_some() {
+    if path.is_file() || (!path.exists() && path.extension().is_some()) {
         path.parent()
             .map(|p| p.to_path_buf())
             .ok_or_else(|| "Invalid file path: has no parent".to_string())

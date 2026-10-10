@@ -84,12 +84,7 @@ fn update_index_after_restore(
     let mut store = BackupStore::new(target_save_dir)?;
     store.index.games.insert(
         info.game_number,
-        IndexEntry {
-            last_hash: hash,
-            last_source_size: source.size,
-            last_source_modified: source.modified_nanos,
-            last_backup_path: folder_name.to_string(),
-        },
+        IndexEntry::from_source(hash, &source, folder_name.to_string()),
     );
     store.save()
 }

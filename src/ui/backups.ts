@@ -316,10 +316,10 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
           // If input is empty, we can't reload, but we can try to clean up the stale DOM row
           const row = findRowByBackupId(backup.path);
           if (row) {
+            // Read the sibling before detaching; a detached row has no sibling
+            const nextSibling = row.nextElementSibling;
             rowMap.delete(backup.path);
             row.remove();
-            // Also remove associated note row if present
-            const nextSibling = row.nextElementSibling;
             if (nextSibling?.classList.contains("note-row")) {
               nextSibling.remove();
             }

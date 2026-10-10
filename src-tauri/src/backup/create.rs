@@ -43,12 +43,7 @@ fn update_index_after_backup(
 ) {
     index.games.insert(
         game_number,
-        IndexEntry {
-            last_hash: hash,
-            last_source_size: source.size,
-            last_source_modified: source.modified_nanos,
-            last_backup_path: folder_name,
-        },
+        IndexEntry::from_source(hash, source, folder_name),
     );
 }
 
@@ -94,12 +89,11 @@ fn is_duplicate_by_index(
                 {
                     index.games.insert(
                         game_number,
-                        IndexEntry {
-                            last_hash: hash.to_string(),
-                            last_source_size: source.size,
-                            last_source_modified: source.modified_nanos,
-                            last_backup_path: entry.last_backup_path.clone(),
-                        },
+                        IndexEntry::from_source(
+                            hash.to_string(),
+                            source,
+                            entry.last_backup_path.clone(),
+                        ),
                     );
                 }
 
@@ -138,12 +132,7 @@ fn is_duplicate_by_content(
             // Update index to point to this backup for future fast-path metadata matches
             index.games.insert(
                 game_number,
-                IndexEntry {
-                    last_hash: hash.to_string(),
-                    last_source_size: source.size,
-                    last_source_modified: source.modified_nanos,
-                    last_backup_path: backup.filename.clone(),
-                },
+                IndexEntry::from_source(hash.to_string(), source, backup.filename.clone()),
             );
             return true;
         }
@@ -184,14 +173,12 @@ pub(crate) fn perform_backup_for_game_internal(
         return Ok(None);
     }
 
-    // 2. Backups are now passed in (backups list fetched once by caller)
-
-    // 3. Fallback duplicate check (Content scan)
+    // 2. Fallback duplicate check (Content scan)
     if is_duplicate_by_content(index, game_number, &hash, &source, backups) {
         return Ok(None);
     }
 
-    // 4. Enforce limit
+    // 3. Enforce limit
     if let Err(e) = enforce_backup_limit(game_number, limit, backups, index) {
         log::error!(
             "Failed to enforce backup limit for game {}: {}",

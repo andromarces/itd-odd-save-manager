@@ -283,7 +283,10 @@ describe("createBackupsFeature - loadBackups serialization", () => {
     await Promise.resolve(); // Flush microtasks from old finally
 
     // The new call should still be resolvable (in-flight not clobbered)
-    const backup = makeBackup({ filename: "intact.sav", path: "/b/intact.sav" });
+    const backup = makeBackup({
+      filename: "intact.sav",
+      path: "/b/intact.sav",
+    });
     resolveNew([backup]);
     await newCall;
 
@@ -302,7 +305,10 @@ describe("createBackupsFeature - loadBackups serialization", () => {
     const { invokeAction } = await import("../ui_utils");
     const { createBackupsFeature } = await import("./backups");
 
-    const followUpBackup = makeBackup({ filename: "follow.sav", path: "/b/follow.sav" });
+    const followUpBackup = makeBackup({
+      filename: "follow.sav",
+      path: "/b/follow.sav",
+    });
 
     let resolveFirst!: (v: BackupInfo[]) => void;
 
@@ -617,6 +623,84 @@ describe("createBackupsFeature - refresh button state", () => {
 
     // Button must remain disabled — availability was revoked mid-load
     expect(elements.refreshBackupsButton.disabled).toBe(true);
+
+    feature.destroy();
+  });
+});
+
+describe("createBackupsFeature - deleteBackup fallback path", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = "";
+  });
+
+  /**
+   * Regression: the fallback branch must read the note row sibling before the
+   * backup row is detached, otherwise the note row is left orphaned.
+   *
+   * The fallback is only reachable when currentBackups no longer holds the
+   * backup while its row is still rendered. The production code passes
+   * currentBackups to the master delete controller, so the test removes the
+   * entry through that hand-off instead of through the mocked load response.
+   * Branch coverage is asserted through effects only the fallback produces:
+   * the untouched sibling row keeps its node identity (the primary path
+   * re-renders every row) and no reload is issued (the non-empty input branch).
+   */
+  it("removes the note row with the backup row in the fallback path", async () => {
+    const elements = setupDom();
+    const { invokeAction } = await import("../ui_utils");
+    const { MasterDeleteController } = await import("./backups/dialog");
+    const { createBackupsFeature } = await import("./backups");
+
+    vi.mocked(invokeAction)
+      .mockResolvedValueOnce([
+        makeBackup({
+          filename: "noted.sav",
+          path: "/b/noted.sav",
+          note: "keep me",
+        }),
+        makeBackup({ filename: "other.sav", path: "/b/other.sav" }),
+      ])
+      .mockResolvedValueOnce(true); // delete: success
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const feature = createBackupsFeature(elements);
+    await feature.loadBackups();
+
+    const otherRow = elements.backupsList.querySelector('tr[data-backup-id="/b/other.sav"]');
+    expect(otherRow).not.toBeNull();
+    expect(elements.backupsList.querySelectorAll(".note-row")).toHaveLength(1);
+
+    // Hand-off: the controller receives the live list and drops the backup from it.
+    elements.masterDeleteButton.click();
+    const controller = vi.mocked(MasterDeleteController).mock.results[0].value as {
+      open: ReturnType<typeof vi.fn>;
+    };
+    const liveList = controller.open.mock.calls[0][0] as BackupInfo[];
+    liveList.splice(
+      liveList.findIndex((b) => b.path === "/b/noted.sav"),
+      1,
+    );
+    elements.manualInput.value = "";
+
+    elements.backupsList
+      .querySelector<HTMLButtonElement>(
+        'button[data-action="delete"][data-backup-id="/b/noted.sav"]',
+      )
+      ?.click();
+
+    await vi.waitFor(() =>
+      expect(elements.backupsList.querySelector('tr[data-backup-id="/b/noted.sav"]')).toBeNull(),
+    );
+
+    expect(elements.backupsList.querySelectorAll(".note-row")).toHaveLength(0);
+    expect(elements.backupsList.querySelector('tr[data-backup-id="/b/other.sav"]')).toBe(otherRow);
+    expect(vi.mocked(invokeAction)).toHaveBeenCalledTimes(2); // load + delete, no reload
 
     feature.destroy();
   });
