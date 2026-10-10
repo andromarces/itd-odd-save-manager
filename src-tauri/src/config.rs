@@ -396,7 +396,7 @@ pub(crate) fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<(),
         format!("Failed to serialize config: {}", e)
     })?;
 
-    write_atomic(path, json.as_bytes()).map_err(|e| {
+    write_atomic::<AppConfig>(path, json.as_bytes()).map_err(|e| {
         log::error!("Failed to write config file: {}", e);
         format!("Failed to write config file: {}", e)
     })?;
@@ -525,20 +525,25 @@ mod tests {
         assert_eq!(loaded.max_backups_per_game, 100);
     }
 
-    /// Tests that a corrupt config loads defaults and the damaged file is preserved.
+    /// Tests that a corrupt config loads defaults, and a later save preserves the damaged bytes.
     #[test]
-    fn test_load_config_from_path_corrupt_is_preserved() {
+    fn test_corrupt_config_is_preserved_on_save() {
         let temp_dir = tempdir().expect("failed to create temp dir");
         let config_path = temp_dir.path().join("config.json");
         fs::write(&config_path, "{\"save_path\": ").unwrap();
 
         let loaded = load_config_from_path(&config_path);
         assert!(loaded.save_path.is_none());
-        assert!(!config_path.exists());
+        assert_eq!(
+            fs::read_to_string(&config_path).unwrap(),
+            "{\"save_path\": "
+        );
 
+        save_config_to_path(&loaded, &config_path).unwrap();
         let preserved: Vec<_> = fs::read_dir(temp_dir.path())
             .unwrap()
             .map(|e| e.unwrap().path())
+            .filter(|p| p != &config_path)
             .collect();
         assert_eq!(preserved.len(), 1);
         assert_eq!(

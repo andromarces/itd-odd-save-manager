@@ -71,7 +71,7 @@ impl BackupStore {
 
 /// Loads the backup index from the given backup root directory.
 /// Returns a default index if the file is missing or damaged. A damaged file is logged at error
-/// level and preserved (see `load_json`).
+/// level and left in place. The next save preserves it before replacing it (see `write_atomic`).
 pub(crate) fn load_index(backup_root: &Path) -> BackupIndex {
     load_json(&backup_root.join(INDEX_FILE_NAME), "Backup index").unwrap_or_default()
 }
@@ -80,7 +80,7 @@ pub(crate) fn load_index(backup_root: &Path) -> BackupIndex {
 pub(crate) fn save_index(backup_root: &Path, index: &BackupIndex) -> Result<(), String> {
     let index_path = backup_root.join(INDEX_FILE_NAME);
     let content = serde_json::to_string(index).map_err(|e| e.to_string())?;
-    write_atomic(&index_path, content.as_bytes()).map_err(|e| e.to_string())
+    write_atomic::<BackupIndex>(&index_path, content.as_bytes()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -110,19 +110,22 @@ mod tests {
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
-    /// Verifies a corrupt index is moved aside with its contents intact.
+    /// Verifies a corrupt index loads empty, and a later save preserves the damaged bytes.
     #[test]
-    fn test_load_index_corrupt_is_preserved() {
+    fn test_load_index_corrupt_is_preserved_on_save() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join(INDEX_FILE_NAME), b"{\"games\": {").unwrap();
+        let index_path = dir.path().join(INDEX_FILE_NAME);
+        fs::write(&index_path, b"{\"games\": {").unwrap();
 
         let loaded = load_index(dir.path());
         assert!(loaded.games.is_empty() && loaded.notes.is_empty());
-        assert!(!dir.path().join(INDEX_FILE_NAME).exists());
+        assert_eq!(fs::read(&index_path).unwrap(), b"{\"games\": {");
 
+        save_index(dir.path(), &loaded).unwrap();
         let preserved: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().path())
+            .filter(|p| p != &index_path)
             .collect();
         assert_eq!(preserved.len(), 1);
         assert_eq!(fs::read(&preserved[0]).unwrap(), b"{\"games\": {");

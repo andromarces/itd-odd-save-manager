@@ -5,14 +5,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 
 /// Counter that makes temporary file names unique within the process.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Paths of damaged files that could be neither moved nor copied aside.
-/// `write_atomic` refuses to replace them, so the only remaining copy is never lost.
-static UNPRESERVED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 /// Returns a sibling path of `path` with `suffix` appended to the file name.
 fn sibling_with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -43,34 +38,74 @@ fn create_temp(path: &Path) -> io::Result<(File, PathBuf)> {
     }
 }
 
-fn is_unpreserved(path: &Path) -> bool {
-    UNPRESERVED
-        .lock()
-        .map(|list| list.iter().any(|p| p == path))
-        .unwrap_or(false)
+fn timestamp() -> String {
+    chrono::Utc::now().format("%Y%m%dT%H%M%S%3f").to_string()
 }
 
-fn set_unpreserved(path: &Path, damaged: bool) {
-    if let Ok(mut list) = UNPRESERVED.lock() {
-        list.retain(|p| p != path);
-        if damaged {
-            list.push(path.to_path_buf());
+/// Copies `bytes` to a new sibling `<name>.corrupt-<stamp>[-n]`.
+/// `create_new` with a retry on the next suffix guarantees that an existing file is never replaced.
+fn preserve_copy(path: &Path, bytes: &[u8], stamp: &str) -> io::Result<PathBuf> {
+    let mut n = 0u32;
+    loop {
+        let suffix = if n == 0 {
+            format!(".corrupt-{stamp}")
+        } else {
+            format!(".corrupt-{stamp}-{n}")
+        };
+        let target = sibling_with_suffix(path, &suffix);
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+        {
+            Ok(mut dest) => {
+                let written = dest.write_all(bytes).and_then(|()| dest.sync_all());
+                if written.is_err() {
+                    let _ = fs::remove_file(&target);
+                }
+                return written.map(|()| target);
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => n += 1,
+            Err(e) => return Err(e),
         }
     }
 }
 
 /// Writes `contents` to `path` so that readers see either the old or the new file, never a partial one.
 ///
-/// Data goes to a unique sibling `<name>.<pid>.<n>.tmp` file (same directory, so the rename stays on
-/// one filesystem), is flushed to disk, then renamed over `path`. Only the temporary file that this
-/// call created is removed on failure. The parent directory is not fsynced.
-/// Fails without writing if `path` holds a damaged file that could not be preserved.
-pub(crate) fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
-    if is_unpreserved(path) {
-        return Err(io::Error::other(
-            "refusing to overwrite a damaged file that could not be preserved",
-        ));
+/// If `path` already holds a file that does not parse as `T`, the bytes are first copied to
+/// `<name>.corrupt-<timestamp>[-n]`. If that copy fails, or the file cannot be read, the save
+/// returns an error and leaves `path` untouched.
+///
+/// Data then goes to a unique sibling `<name>.<pid>.<n>.tmp` file (same directory, so the rename
+/// stays on one filesystem), is flushed to disk, then renamed over `path`. Only the temporary file
+/// that this call created is removed on failure. The parent directory is not fsynced.
+// known-limit: the target can change between the validity read and the rename
+pub(crate) fn write_atomic<T: DeserializeOwned>(path: &Path, contents: &[u8]) -> io::Result<()> {
+    write_atomic_with_stamp::<T>(path, contents, &timestamp())
+}
+
+fn write_atomic_with_stamp<T: DeserializeOwned>(
+    path: &Path,
+    contents: &[u8],
+    stamp: &str,
+) -> io::Result<()> {
+    match fs::read(path) {
+        Ok(existing) => {
+            if serde_json::from_slice::<T>(&existing).is_err() {
+                let preserved = preserve_copy(path, &existing, stamp).inspect_err(|e| {
+                    log::error!("Failed to preserve damaged file {:?}: {}", path, e)
+                })?;
+                log::error!("Damaged file {:?} preserved at {:?}", path, preserved);
+            }
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => {
+            log::error!("Failed to read {:?} before overwrite: {}", path, e);
+            return Err(e);
+        }
     }
+
     let (mut file, tmp_path) = create_temp(path)?;
     let result = file
         .write_all(contents)
@@ -85,86 +120,10 @@ pub(crate) fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     result
 }
 
-/// Returns a sibling path `<name>.corrupt-<timestamp>[-n]` that does not exist yet.
-// known-limit: the existence check is not atomic against another process preserving the same file
-fn unique_corrupt_path(path: &Path) -> PathBuf {
-    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%3f");
-    let mut n = 0u32;
-    loop {
-        let suffix = if n == 0 {
-            format!(".corrupt-{stamp}")
-        } else {
-            format!(".corrupt-{stamp}-{n}")
-        };
-        let candidate = sibling_with_suffix(path, &suffix);
-        if !candidate.exists() {
-            return candidate;
-        }
-        n += 1;
-    }
-}
-
-/// Renames a damaged file to a unique sibling `<name>.corrupt-<timestamp>`. Never replaces a file.
-pub(crate) fn quarantine_corrupt(path: &Path) -> io::Result<PathBuf> {
-    let target = unique_corrupt_path(path);
-    fs::rename(path, &target)?;
-    Ok(target)
-}
-
-/// Copies a damaged file to a unique sibling `<name>.corrupt-<timestamp>`, leaving the original in
-/// place. Never replaces a file.
-pub(crate) fn copy_corrupt(path: &Path) -> io::Result<PathBuf> {
-    let mut source = File::open(path)?;
-    loop {
-        let target = unique_corrupt_path(path);
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&target)
-        {
-            Ok(mut dest) => {
-                let copied = io::copy(&mut source, &mut dest).and_then(|_| dest.sync_all());
-                if copied.is_err() {
-                    let _ = fs::remove_file(&target);
-                }
-                return copied.map(|()| target);
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
-        }
-    }
-}
-
-/// Preserves a damaged file: tries `rename_step`, then `copy_step`. If both fail, the path is
-/// marked so `write_atomic` refuses to overwrite it. Logs every outcome at error level.
-fn preserve_with(
-    path: &Path,
-    rename_step: impl Fn(&Path) -> io::Result<PathBuf>,
-    copy_step: impl Fn(&Path) -> io::Result<PathBuf>,
-) {
-    match rename_step(path) {
-        Ok(moved) => log::error!("Damaged file {:?} preserved at {:?}", path, moved),
-        Err(re) => {
-            log::error!("Failed to move damaged file {:?} aside: {}", path, re);
-            match copy_step(path) {
-                Ok(copy) => log::error!("Damaged file {:?} copied to {:?}", path, copy),
-                Err(ce) => {
-                    log::error!(
-                        "Failed to preserve damaged file {:?}: {}. Overwrites are blocked until it parses",
-                        path,
-                        ce
-                    );
-                    set_unpreserved(path, true);
-                }
-            }
-        }
-    }
-}
-
 /// Loads and parses a JSON file. Returns `None` if the file is missing or damaged.
 ///
-/// A damaged file (any read error other than not found, invalid UTF-8, or a parse error) is logged
-/// at error level and preserved, so a later save cannot silently discard it.
+/// A damaged file (parse error, invalid UTF-8, or a read error other than not found) is logged at
+/// error level and left in place. The next `write_atomic` preserves it before replacing it.
 pub(crate) fn load_json<T: DeserializeOwned>(path: &Path, label: &str) -> Option<T> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
@@ -174,18 +133,13 @@ pub(crate) fn load_json<T: DeserializeOwned>(path: &Path, label: &str) -> Option
         }
         Err(e) => {
             log::error!("Failed to read {} file {:?}: {}", label, path, e);
-            preserve_with(path, quarantine_corrupt, copy_corrupt);
             return None;
         }
     };
     match serde_json::from_slice(&bytes) {
-        Ok(value) => {
-            set_unpreserved(path, false);
-            Some(value)
-        }
+        Ok(value) => Some(value),
         Err(e) => {
             log::error!("Failed to parse {} file {:?}: {}", label, path, e);
-            preserve_with(path, quarantine_corrupt, copy_corrupt);
             None
         }
     }
@@ -194,6 +148,7 @@ pub(crate) fn load_json<T: DeserializeOwned>(path: &Path, label: &str) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
     use tempfile::tempdir;
 
     fn dir_entries(dir: &Path) -> Vec<PathBuf> {
@@ -203,30 +158,43 @@ mod tests {
             .collect()
     }
 
-    /// Verifies a write creates the file and leaves no temporary sibling.
+    /// Returns every entry in `dir` other than `path`.
+    fn others(dir: &Path, path: &Path) -> Vec<PathBuf> {
+        dir_entries(dir).into_iter().filter(|p| p != path).collect()
+    }
+
+    /// Verifies a write creates the file, replaces valid content, and leaves no sibling.
     #[test]
-    fn test_write_atomic_creates_and_replaces() {
+    fn test_write_atomic_round_trip() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("data.json");
-        write_atomic(&path, b"one").unwrap();
-        write_atomic(&path, b"two").unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"two");
+        write_atomic::<Value>(&path, br#"{"a":1}"#).unwrap();
+        write_atomic::<Value>(&path, br#"{"a":2}"#).unwrap();
+        assert_eq!(load_json::<Value>(&path, "test").unwrap()["a"], 2);
         assert_eq!(dir_entries(dir.path()), vec![path]);
     }
 
-    /// Verifies a failed write leaves the target intact and removes the temporary file.
+    /// Verifies a missing file loads as None without creating anything.
+    #[test]
+    fn test_load_json_missing() {
+        let dir = tempdir().unwrap();
+        assert!(load_json::<Value>(&dir.path().join("data.json"), "test").is_none());
+        assert!(dir_entries(dir.path()).is_empty());
+    }
+
+    /// Verifies a failed write leaves the target intact and creates no temporary file.
     #[test]
     fn test_write_atomic_failure_preserves_target() {
         let dir = tempdir().unwrap();
-        // A directory at the target path makes the final rename fail.
+        // A directory at the target path cannot be read or replaced.
         let path = dir.path().join("data.json");
         fs::create_dir(&path).unwrap();
-        assert!(write_atomic(&path, b"x").is_err());
+        assert!(write_atomic::<Value>(&path, b"{}").is_err());
         assert!(path.is_dir());
         assert_eq!(dir_entries(dir.path()), vec![path]);
     }
 
-    /// Verifies temporary names never collide and a failed write spares other temporary files.
+    /// Verifies temporary names never collide.
     #[test]
     fn test_temp_names_are_unique() {
         let path = Path::new("data.json");
@@ -234,104 +202,73 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let target = dir.path().join("data.json");
-        let (_file, other_tmp) = create_temp(&target).unwrap();
-        let (_file2, own_tmp) = create_temp(&target).unwrap();
-        assert_ne!(other_tmp, own_tmp);
-
-        fs::create_dir(&target).unwrap();
-        assert!(write_atomic(&target, b"x").is_err());
-        assert!(other_tmp.exists() && own_tmp.exists());
+        let (_file, first) = create_temp(&target).unwrap();
+        let (_file2, second) = create_temp(&target).unwrap();
+        assert_ne!(first, second);
     }
 
-    /// Verifies quarantine moves the file to a sibling and keeps its contents.
+    /// Verifies loading a corrupt file returns None and leaves the file untouched.
     #[test]
-    fn test_quarantine_corrupt_preserves_contents() {
+    fn test_load_json_corrupt_is_left_in_place() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("data.json");
         fs::write(&path, b"{trunc").unwrap();
-        let moved = quarantine_corrupt(&path).unwrap();
-        assert!(!path.exists());
-        assert_eq!(moved.parent(), path.parent());
-        assert_eq!(fs::read(&moved).unwrap(), b"{trunc");
+        assert!(load_json::<Value>(&path, "test").is_none());
+        assert_eq!(fs::read(&path).unwrap(), b"{trunc");
+        assert_eq!(dir_entries(dir.path()), vec![path]);
     }
 
-    /// Verifies a colliding destination is skipped and the earlier preserved file is untouched.
+    /// Verifies a normal save after a corrupt load succeeds and leaves one preserved copy.
     #[test]
-    fn test_quarantine_destination_collision() {
+    fn test_save_after_corrupt_load_preserves_copy() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("data.json");
-        fs::write(&path, b"second").unwrap();
-        // Occupy the first candidate name.
-        let first = unique_corrupt_path(&path);
-        fs::write(&first, b"first").unwrap();
+        fs::write(&path, b"{trunc").unwrap();
+        assert!(load_json::<Value>(&path, "test").is_none());
 
-        let moved = quarantine_corrupt(&path).unwrap();
-        assert_ne!(moved, first);
-        assert_eq!(fs::read(&first).unwrap(), b"first");
-        assert_eq!(fs::read(&moved).unwrap(), b"second");
+        write_atomic::<Value>(&path, b"{}").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{}");
+        let preserved = others(dir.path(), &path);
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(fs::read(&preserved[0]).unwrap(), b"{trunc");
     }
 
-    /// Verifies the copy fallback keeps the original and never replaces an existing file.
+    /// Verifies invalid UTF-8 is preserved byte for byte before the save replaces it.
     #[test]
-    fn test_copy_corrupt_keeps_original() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("data.json");
-        fs::write(&path, b"damaged").unwrap();
-        let first = copy_corrupt(&path).unwrap();
-        let second = copy_corrupt(&path).unwrap();
-        assert_ne!(first, second);
-        assert_eq!(fs::read(&path).unwrap(), b"damaged");
-        assert_eq!(fs::read(&first).unwrap(), b"damaged");
-    }
-
-    /// Verifies a failed move falls back to a copy.
-    #[test]
-    fn test_preserve_falls_back_to_copy() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("data.json");
-        fs::write(&path, b"damaged").unwrap();
-        preserve_with(
-            &path,
-            |_| Err(io::Error::other("rename blocked")),
-            copy_corrupt,
-        );
-        assert_eq!(fs::read(&path).unwrap(), b"damaged");
-        assert_eq!(dir_entries(dir.path()).len(), 2);
-        // The copy exists, so a save may replace the original.
-        write_atomic(&path, b"new").unwrap();
-    }
-
-    /// Verifies that when move and copy both fail, the original survives and saves are refused.
-    #[test]
-    fn test_failed_quarantine_does_not_lose_original() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("data.json");
-        fs::write(&path, b"damaged").unwrap();
-        preserve_with(
-            &path,
-            |_| Err(io::Error::other("rename blocked")),
-            |_| Err(io::Error::other("copy blocked")),
-        );
-        assert!(write_atomic(&path, b"new").is_err());
-        assert_eq!(fs::read(&path).unwrap(), b"damaged");
-        assert_eq!(dir_entries(dir.path()), vec![path.clone()]);
-
-        // A later valid load lifts the block.
-        fs::write(&path, b"{}").unwrap();
-        assert!(load_json::<serde_json::Value>(&path, "test").is_some());
-        write_atomic(&path, b"new").unwrap();
-    }
-
-    /// Verifies invalid UTF-8 is treated as damage and preserved.
-    #[test]
-    fn test_load_json_invalid_utf8_is_preserved() {
+    fn test_invalid_utf8_is_preserved() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("data.json");
         fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
-        assert!(load_json::<serde_json::Value>(&path, "test").is_none());
-        assert!(!path.exists());
-        let preserved = dir_entries(dir.path());
+        assert!(load_json::<Value>(&path, "test").is_none());
+
+        write_atomic::<Value>(&path, b"{}").unwrap();
+        let preserved = others(dir.path(), &path);
         assert_eq!(preserved.len(), 1);
         assert_eq!(fs::read(&preserved[0]).unwrap(), [0xff, 0xfe, 0xfd]);
+    }
+
+    /// Verifies a destination collision keeps both copies.
+    #[test]
+    fn test_preserve_collision_keeps_both_copies() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("data.json");
+        let first = preserve_copy(&path, b"first", "stamp").unwrap();
+        let second = preserve_copy(&path, b"second", "stamp").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(fs::read(&first).unwrap(), b"first");
+        assert_eq!(fs::read(&second).unwrap(), b"second");
+    }
+
+    /// Verifies a failed preservation returns an error and leaves the original bytes.
+    #[test]
+    fn test_failed_preservation_leaves_original() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("data.json");
+        fs::write(&path, b"{trunc").unwrap();
+        // A stamp with a path separator points into a missing directory, so the copy fails.
+        let result = write_atomic_with_stamp::<Value>(&path, b"{}", "no/such/dir");
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"{trunc");
+        assert_eq!(dir_entries(dir.path()), vec![path]);
     }
 }
