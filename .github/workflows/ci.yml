@@ -69,7 +69,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        # pnpm/setup downloads the pinned release binary directly. It reads
+        # `packageManager` and skips the npm bootstrap and self-switch that
+        # pnpm/action-setup runs.
+        uses: pnpm/setup@v3
+        with:
+          install: false
+          node-version-file: false
       # Cache only the content-addressable files and index. The global virtual
       # store (`links`) holds symlinks that Git's MSYS tar restores as links
       # that native pnpm cannot read (Access is denied).
@@ -96,6 +102,8 @@ jobs:
           node-version-file: .nvmrc
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Verify pnpm version
+        run: pnpm --version
       - name: Verify global virtual store
         run: pnpm config get virtualStoreType
       - name: Check oxfmt formatting
