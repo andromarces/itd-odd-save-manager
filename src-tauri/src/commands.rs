@@ -350,4 +350,175 @@ mod tests {
         fs::File::create(&other).expect("failed to create mock unauthorized file");
         assert!(verify_backup_path(&save_path, &other).is_err());
     }
+
+    /// Windows path forms that reach `verify_backup_path` from the frontend and the config.
+    #[cfg(windows)]
+    mod windows_path_forms {
+        use super::*;
+        use std::fs;
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+        struct Fixture {
+            _temp_dir: tempfile::TempDir,
+            save_path: PathBuf,
+            backup_root: PathBuf,
+            backup: PathBuf,
+            outside: PathBuf,
+        }
+
+        fn fixture() -> Fixture {
+            let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+            let save_path = temp_dir.path().join("saves");
+            let backup_root = save_path.join(BACKUP_DIR_NAME);
+            let backup = backup_root.join(VALID_FOLDER);
+            let outside = temp_dir.path().join("outside").join(VALID_FOLDER);
+            fs::create_dir_all(&backup).expect("failed to create backup dir");
+            fs::create_dir_all(&outside).expect("failed to create outside dir");
+            Fixture {
+                _temp_dir: temp_dir,
+                save_path,
+                backup_root,
+                backup,
+                outside,
+            }
+        }
+
+        fn flip_drive_case(path: &Path) -> PathBuf {
+            let text = path.to_str().expect("temp path must be UTF-8");
+            let mut chars = text.chars();
+            let drive = chars.next().expect("path must not be empty");
+            let flipped = if drive.is_ascii_uppercase() {
+                drive.to_ascii_lowercase()
+            } else {
+                drive.to_ascii_uppercase()
+            };
+            PathBuf::from(format!("{flipped}{}", chars.as_str()))
+        }
+
+        fn forward_slashes(path: &Path) -> PathBuf {
+            PathBuf::from(
+                path.to_str()
+                    .expect("temp path must be UTF-8")
+                    .replace('\\', "/"),
+            )
+        }
+
+        fn trailing_separator(path: &Path) -> PathBuf {
+            let mut text = path.as_os_str().to_owned();
+            text.push("\\");
+            PathBuf::from(text)
+        }
+
+        fn verbatim(path: &Path) -> PathBuf {
+            let canonical = path.canonicalize().expect("failed to canonicalize path");
+            assert!(canonical.to_string_lossy().starts_with(r"\\?\"));
+            canonical
+        }
+
+        /// Returns the 8.3 form of an existing path, or `None` when the volume generates no
+        /// short name for it.
+        fn short_form(path: &Path) -> Option<PathBuf> {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GetShortPathNameW(long: *const u16, short: *mut u16, len: u32) -> u32;
+            }
+            let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+            let mut buf = vec![0u16; 1024];
+            // SAFETY: `wide` is NUL-terminated and `buf` is writable for `buf.len()` units.
+            let written =
+                unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) }
+                    as usize;
+            if written == 0 || written > buf.len() {
+                return None;
+            }
+            let short = PathBuf::from(std::ffi::OsString::from_wide(&buf[..written]));
+            let unchanged = short
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&path.to_string_lossy());
+            (!unchanged).then_some(short)
+        }
+
+        type Form = fn(&Path) -> PathBuf;
+        const FORMS: [(&str, Form); 4] = [
+            ("drive-letter case", flip_drive_case),
+            ("forward slashes", forward_slashes),
+            ("trailing separator", trailing_separator),
+            ("verbatim", verbatim),
+        ];
+
+        /// Verifies that a valid backup folder is accepted in every Windows path form, whether the
+        /// form applies to the backup path, the configured save path, or both.
+        #[test]
+        fn test_verify_backup_path_accepts_windows_forms_of_valid_backup() {
+            let fx = fixture();
+            let expected = fx.backup.canonicalize().expect("failed to canonicalize");
+            for (name, form) in FORMS {
+                let cases = [
+                    ("backup path", fx.save_path.clone(), form(&fx.backup)),
+                    ("save path", form(&fx.save_path), fx.backup.clone()),
+                    ("both", form(&fx.save_path), form(&fx.backup)),
+                ];
+                for (side, save_path, backup_path) in cases {
+                    let verified = verify_backup_path(&save_path, &backup_path)
+                        .unwrap_or_else(|e| panic!("{name} on {side} rejected: {e}"));
+                    assert_eq!(verified, expected, "{name} on {side}");
+                }
+            }
+        }
+
+        /// Verifies that the backup root and a path outside it stay rejected in every Windows
+        /// path form, so no form defeats the containment check.
+        #[test]
+        fn test_verify_backup_path_rejects_windows_forms_of_root_and_outside() {
+            let fx = fixture();
+            for (name, form) in FORMS {
+                for (label, target) in [("root", &fx.backup_root), ("outside", &fx.outside)] {
+                    let cases = [
+                        (fx.save_path.clone(), form(target)),
+                        (form(&fx.save_path), form(target)),
+                    ];
+                    for (save_path, backup_path) in cases {
+                        assert!(
+                            verify_backup_path(&save_path, &backup_path).is_err(),
+                            "{name} form of {label} was accepted"
+                        );
+                    }
+                }
+            }
+        }
+
+        /// Verifies the 8.3 short-name forms of the save path and backup folder are accepted and
+        /// the short-name forms of the root and an outside path are rejected. Skips when the
+        /// volume generates no short name.
+        #[test]
+        fn test_verify_backup_path_handles_short_name_forms() {
+            let fx = fixture();
+            let (Some(short_save), Some(short_backup)) =
+                (short_form(&fx.save_path), short_form(&fx.backup))
+            else {
+                eprintln!("SKIPPED: volume generates no 8.3 short names");
+                return;
+            };
+            let expected = fx.backup.canonicalize().expect("failed to canonicalize");
+
+            assert_eq!(
+                verify_backup_path(&short_save, &fx.backup).expect("short save path rejected"),
+                expected
+            );
+            assert_eq!(
+                verify_backup_path(&fx.save_path, &short_backup).expect("short backup rejected"),
+                expected
+            );
+            assert_eq!(
+                verify_backup_path(&short_save, &short_backup).expect("short both rejected"),
+                expected
+            );
+
+            let short_root = short_form(&fx.backup_root).expect("root short name missing");
+            assert!(verify_backup_path(&fx.save_path, &short_root).is_err());
+            let short_outside = short_form(&fx.outside).expect("outside short name missing");
+            assert!(verify_backup_path(&fx.save_path, &short_outside).is_err());
+            assert!(verify_backup_path(&short_save, &short_outside).is_err());
+        }
+    }
 }
