@@ -283,7 +283,10 @@ describe("createBackupsFeature - loadBackups serialization", () => {
     await Promise.resolve(); // Flush microtasks from old finally
 
     // The new call should still be resolvable (in-flight not clobbered)
-    const backup = makeBackup({ filename: "intact.sav", path: "/b/intact.sav" });
+    const backup = makeBackup({
+      filename: "intact.sav",
+      path: "/b/intact.sav",
+    });
     resolveNew([backup]);
     await newCall;
 
@@ -302,7 +305,10 @@ describe("createBackupsFeature - loadBackups serialization", () => {
     const { invokeAction } = await import("../ui_utils");
     const { createBackupsFeature } = await import("./backups");
 
-    const followUpBackup = makeBackup({ filename: "follow.sav", path: "/b/follow.sav" });
+    const followUpBackup = makeBackup({
+      filename: "follow.sav",
+      path: "/b/follow.sav",
+    });
 
     let resolveFirst!: (v: BackupInfo[]) => void;
 
@@ -617,6 +623,65 @@ describe("createBackupsFeature - refresh button state", () => {
 
     // Button must remain disabled — availability was revoked mid-load
     expect(elements.refreshBackupsButton.disabled).toBe(true);
+
+    feature.destroy();
+  });
+});
+
+describe("createBackupsFeature - deleteBackup fallback path", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = "";
+  });
+
+  /**
+   * Regression: the fallback branch must read the note row sibling before the
+   * backup row is detached, otherwise the note row is left orphaned.
+   */
+  it("removes the note row together with the backup row when the list no longer holds the backup", async () => {
+    const elements = setupDom();
+    const { invokeAction } = await import("../ui_utils");
+    const { createBackupsFeature } = await import("./backups");
+
+    const backups = [
+      makeBackup({
+        filename: "noted.sav",
+        path: "/b/noted.sav",
+        note: "keep me",
+      }),
+      makeBackup({ filename: "other.sav", path: "/b/other.sav" }),
+    ];
+
+    vi.mocked(invokeAction)
+      .mockResolvedValueOnce(backups) // load: the array becomes the internal currentBackups
+      .mockResolvedValueOnce(true); // delete: success
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const feature = createBackupsFeature(elements);
+    await feature.loadBackups();
+
+    expect(elements.backupsList.querySelectorAll(".note-row")).toHaveLength(1);
+
+    // Simulate a list refresh that dropped the backup, with no save path to reload from.
+    backups.splice(0, 1);
+    elements.manualInput.value = "";
+
+    const deleteButton = elements.backupsList.querySelector<HTMLButtonElement>(
+      'button[data-action="delete"][data-backup-id="/b/noted.sav"]',
+    );
+    expect(deleteButton).not.toBeNull();
+    deleteButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    await vi.waitFor(() =>
+      expect(elements.backupsList.querySelector('tr[data-backup-id="/b/noted.sav"]')).toBeNull(),
+    );
+    expect(elements.backupsList.querySelectorAll(".note-row")).toHaveLength(0);
+    expect(elements.backupsList.innerHTML).toContain("other.sav");
 
     feature.destroy();
   });
