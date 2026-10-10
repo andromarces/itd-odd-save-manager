@@ -1,5 +1,6 @@
 // ITD ODD Save Manager by andromarces
 
+use crate::atomic_file::{quarantine_corrupt, write_atomic};
 use crate::watcher::FileWatcher;
 use crate::MonitorInvalidator;
 use serde::{Deserialize, Serialize};
@@ -74,7 +75,13 @@ pub fn load_config_from_path(path: &Path) -> AppConfig {
                     log::info!("Configuration loaded successfully");
                     return config;
                 }
-                Err(e) => log::error!("Failed to parse configuration: {}", e),
+                Err(e) => {
+                    log::error!("Failed to parse configuration: {}", e);
+                    match quarantine_corrupt(path) {
+                        Ok(moved) => log::error!("Corrupt configuration preserved at: {:?}", moved),
+                        Err(re) => log::error!("Failed to preserve corrupt configuration: {}", re),
+                    }
+                }
             },
             Err(e) => log::error!("Failed to read configuration file: {}", e),
         }
@@ -404,7 +411,7 @@ pub(crate) fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<(),
         format!("Failed to serialize config: {}", e)
     })?;
 
-    fs::write(path, json).map_err(|e| {
+    write_atomic(path, json.as_bytes()).map_err(|e| {
         log::error!("Failed to write config file: {}", e);
         format!("Failed to write config file: {}", e)
     })?;
@@ -530,6 +537,45 @@ mod tests {
         assert!(!loaded.auto_launch_game);
         assert!(!loaded.auto_close);
         assert_eq!(loaded.max_backups_per_game, 100);
+    }
+
+    /// Tests that a corrupt config loads defaults and the damaged file is preserved.
+    #[test]
+    fn test_load_config_from_path_corrupt_is_preserved() {
+        let temp_dir = tempdir().expect("failed to create temp dir");
+        let config_path = temp_dir.path().join("config.json");
+        fs::write(&config_path, "{\"save_path\": ").unwrap();
+
+        let loaded = load_config_from_path(&config_path);
+        assert!(loaded.save_path.is_none());
+        assert!(!config_path.exists());
+
+        let preserved: Vec<_> = fs::read_dir(temp_dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(
+            fs::read_to_string(&preserved[0]).unwrap(),
+            "{\"save_path\": "
+        );
+    }
+
+    /// Tests that a saved config round-trips through the atomic writer.
+    #[test]
+    fn test_save_config_round_trip() {
+        let temp_dir = tempdir().expect("failed to create temp dir");
+        let config_path = temp_dir.path().join("config.json");
+        let config = AppConfig {
+            save_path: Some("RoundTrip".to_string()),
+            ..AppConfig::default()
+        };
+        save_config_to_path(&config, &config_path).unwrap();
+        assert_eq!(
+            load_config_from_path(&config_path).save_path,
+            Some("RoundTrip".to_string())
+        );
+        assert!(!temp_dir.path().join("config.json.tmp").exists());
     }
 
     /// Tests that the config path mirrors the executable name.
