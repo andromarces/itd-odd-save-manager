@@ -14,7 +14,6 @@ dist-ssr
 *.local
 .env
 .env.*
-.husky/_/
 
 # Rust / Cargo
 /target
@@ -29,3 +28,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.vitest/

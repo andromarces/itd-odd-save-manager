@@ -30,15 +30,15 @@ This document outlines how to build the ITD ODD Save Manager from source. The pr
    pnpm install --frozen-lockfile
    ```
 
-   _Note: `--frozen-lockfile` gives reproducible environments because it fails if `pnpm-lock.yaml` does not match `package.json`. The install also runs the `prepare` lifecycle script, which installs the Husky git hooks automatically. `pnpm-workspace.yaml` sets `virtualStoreType: global`, so `node_modules` entries link into the shared pnpm store (run `pnpm store path` to locate it)._
+   _Note: `--frozen-lockfile` gives reproducible environments because it fails if `pnpm-lock.yaml` does not match `package.json`. The install also runs the `prepare` lifecycle script, which installs the Vite+ git hooks automatically. `pnpm-workspace.yaml` sets `virtualStoreType: global`, so `node_modules` entries link into the shared pnpm store (run `pnpm store path` to locate it)._
 
 ## Git Hooks
 
-Git hooks are managed by [Husky](https://typicode.github.io/husky) and run automatically after `pnpm install`.
+Git hooks are managed by the [Vite+](https://viteplus.dev/guide/commit-hooks) hook dispatcher and run automatically after `pnpm install`. The `prepare` script runs `scripts/install-hooks.mjs`, which clears a local `core.hooksPath` of exactly `.husky/_` and then runs `vp config --no-agent`. Project-owned hook scripts live in `.vite-hooks/`.
 
 ### pre-commit
 
-Runs [lint-staged](https://github.com/lint-staged/lint-staged) against staged files only:
+Runs `vp staged` (the `staged` block in `vite.config.ts`) against staged files only:
 
 - **Tracked non-Rust files supported by `oxfmt`** (`*.{css,html,json,json5,jsonc,js,jsx,md,mdx,ts,tsx,toml,vue,yaml,yml}`): formatted with `oxfmt`.
 - **Rust files** (`src-tauri/**/*.rs`): formatted with `rustfmt --edition 2021`.
@@ -61,7 +61,7 @@ Checks execute in fail-fast order. The first failure stops all subsequent checks
    (`*.{css,html,json,json5,jsonc,js,jsx,md,mdx,ts,tsx,toml,vue,yaml,yml}`).
 5. **Rust format check**: checks changed `.rs` files with `rustfmt --check --edition 2021`.
 6. **oxlint**: lints changed JS/TS/framework files using `.oxlintrc.json`
-   (`no-debugger` enforced; jsdoc plugin loaded for future rule expansion).
+   (`no-debugger` enforced; jsdoc plugin loaded for future rule expansion). An unused disable directive is an error (`--report-unused-disable-directives-severity=error`).
 7. **Doc comment heuristic**: flags named JS/TS function declarations, exported const
    arrow functions, and Rust `pub fn` declarations that lack a preceding documentation comment.
    Class methods and private Rust functions are out of scope (high false-positive risk without
@@ -106,6 +106,33 @@ Checks execute in fail-fast order. The first failure stops all subsequent checks
 
    - The artifacts will be located in `src-tauri/target/release/bundle/`.
    - The raw executable is at `src-tauri/target/release/ITD ODD Save Manager.exe`.
+
+## Frontend Scripts
+
+The frontend toolchain runs through [Vite+](https://viteplus.dev/guide/) (`vp`), installed as the `vite-plus` devDependency. No global `vp` install is needed.
+
+| Script                   | Command                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| `pnpm run dev`           | `vp dev`, serves `http://localhost:5173`                                           |
+| `pnpm run build`         | `tsc && vp build`, type-checks `src` before the bundle                             |
+| `pnpm run preview`       | `vp preview`, serves `dist/`                                                       |
+| `pnpm run test`          | `vp test watch`                                                                    |
+| `pnpm run test:run`      | `vp test`, a single run of all frontend and `scripts/` tests                       |
+| `pnpm run test:coverage` | `vp test run --coverage`, writes `coverage/`                                       |
+| `pnpm run lint`          | `oxlint --config .oxlintrc.json --report-unused-disable-directives-severity=error` |
+| `pnpm run format:oxfmt`  | `node ./scripts/run-oxfmt-tracked.mjs`                                             |
+
+## Migrating an Existing Clone
+
+Run these steps in a clone that used the previous Husky hooks:
+
+1. Pull the change: `git pull`.
+2. Remove the old installed tooling and the old Husky dispatcher.
+   - Windows (PowerShell): `Remove-Item -Recurse -Force node_modules, .husky`
+   - macOS: `rm -rf node_modules .husky`
+3. Reinstall: `pnpm install --frozen-lockfile`. The `prepare` script clears a local `core.hooksPath` of exactly `.husky/_`, then runs `vp config --no-agent`.
+4. Check the hooks: `git config core.hooksPath` must print `.vite-hooks/_`. A clone with another custom `core.hooksPath` keeps that value, and the Vite+ hooks stay inactive. To use them, remove the custom value, then run `pnpm exec vp hooks enable`.
+5. Verify the tools: `pnpm exec vp --version`, `pnpm run test:run`, `pnpm run lint`, `pnpm run build`.
 
 ## Verifying Reproducibility
 

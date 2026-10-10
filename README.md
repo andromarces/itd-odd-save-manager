@@ -75,13 +75,15 @@ Windows only.
 
 1. Clone the repository.
 2. Run `pnpm install --frozen-lockfile` to install dependencies from `pnpm-lock.yaml` and configure git hooks. The `virtualStoreType: global` setting in `pnpm-workspace.yaml` keeps one shared copy of each dependency in the pnpm store.
-   - This project uses a `pre-commit` hook (format-only) and a `pre-push` hook (diff-scoped, fail-fast policy enforcement). See [BUILDING.md](BUILDING.md) for details.
+   - This project uses a `pre-commit` hook (format-only) and a `pre-push` hook (diff-scoped, fail-fast policy enforcement). See [BUILDING.md](BUILDING.md) for details, including the steps to migrate an existing clone from the previous Husky hooks.
 
 ### Build
 
 For detailed build instructions and reproducibility steps, please refer to [BUILDING.md](BUILDING.md).
 
 - `pnpm run dev` starts the development server.
+- `pnpm run test:run` runs the frontend and `scripts/` tests.
+- `pnpm run lint` lints the repository with `oxlint`.
 - `pnpm run format` formats tracked files with `oxfmt` and `rustfmt`.
 - `pnpm run tauri build` creates the production executable and installers.
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type { BackupInfo } from "../types";
 import { createBackupRow, createNoteRow } from "./render";
 import { formatDate } from "../../ui_utils";

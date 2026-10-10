@@ -25,10 +25,6 @@ updates:
           - vitest
           - "@vitest/coverage-v8"
           - "@vitest/*"
-      git-hooks:
-        patterns:
-          - husky
-          - lint-staged
       ox-tooling:
         patterns:
           - oxfmt

@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "dev": "vp dev",
+    "build": "tsc && vp build",
+    "preview": "vp preview",
+    "test": "vp test watch",
+    "test:run": "vp test",
+    "test:coverage": "vp test run --coverage",
+    "lint": "oxlint --config .oxlintrc.json --report-unused-disable-directives-severity=error",
     "tauri": "tauri",
     "format": "pnpm run format:oxfmt && pnpm run format:rust",
     "format:check": "pnpm run format:oxfmt:check && pnpm run format:rust:check",
@@ -17,26 +18,20 @@
     "format:oxfmt:check": "node ./scripts/run-oxfmt-tracked.mjs --check",
     "format:rust": "cd src-tauri && cargo fmt",
     "format:rust:check": "cd src-tauri && cargo fmt --all -- --check",
-    "prepare": "husky"
+    "prepare": "node ./scripts/install-hooks.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.1",
-    "@vitest/coverage-v8": "^5.0.3",
-    "husky": "^9.1.7",
+    "@vitest/coverage-v8": "catalog:",
     "jsdom": "^30.1.2",
-    "lint-staged": "^17.6.0",
     "oxfmt": "^0.72.0",
     "oxlint": "^1.87.0",
     "typescript": "~7.0.2",
-    "vite": "^8.3.3",
-    "vitest": "^5.0.3"
-  },
-  "lint-staged": {
-    "!(*.rs)": "node ./scripts/run-oxfmt-tracked.mjs",
-    "**/*.rs": "rustfmt --edition 2021"
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   },
   "engines": {
     "node": "^24.15.0 || >=26.0.0"
