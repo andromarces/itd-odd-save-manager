@@ -68,21 +68,22 @@ Windows only.
 ### Prerequisites
 
 - Rust: minimum supported version 1.95.0. The build toolchain is pinned to 1.99.0 in `rust-toolchain.toml`, and `rustup` installs it automatically.
-- Node.js 26 (CI and release builds; the version is set in `.nvmrc`) & npm. Local development also works on Node.js 24.15.0 or a later 24.x release. Node.js 25 is not supported.
+- Node.js 26 (CI and release builds; the version is set in `.nvmrc`). Local development also works on Node.js 24.15.0 or a later 24.x release. Node.js 25 is not supported.
+- pnpm 12.10.1, the exact version pinned in the `packageManager` field of `package.json`. Install it with the [standalone installer](https://pnpm.io/installation). Corepack is not used.
 
 ### Setup
 
 1. Clone the repository.
-2. Run `npm ci` to install dependencies from `package-lock.json` and configure git hooks.
+2. Run `pnpm install --frozen-lockfile` to install dependencies from `pnpm-lock.yaml` and configure git hooks. The `virtualStoreType: global` setting in `pnpm-workspace.yaml` keeps one shared copy of each dependency in the pnpm store.
    - This project uses a `pre-commit` hook (format-only) and a `pre-push` hook (diff-scoped, fail-fast policy enforcement). See [BUILDING.md](BUILDING.md) for details.
 
 ### Build
 
 For detailed build instructions and reproducibility steps, please refer to [BUILDING.md](BUILDING.md).
 
-- `npm run dev` starts the development server.
-- `npm run format` formats tracked files with `oxfmt` and `rustfmt`.
-- `npm run tauri build` creates the production executable and installers.
+- `pnpm run dev` starts the development server.
+- `pnpm run format` formats tracked files with `oxfmt` and `rustfmt`.
+- `pnpm run tauri build` creates the production executable and installers.
 
 ## Verification
 

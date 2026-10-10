@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust-tests:
     name: rust-tests (${{ matrix.platform }})
@@ -64,17 +68,40 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      # Cache only the content-addressable files and index. The global virtual
+      # store (`links`) holds symlinks that Git's MSYS tar restores as links
+      # that native pnpm cannot read (Access is denied).
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $storePath = (pnpm store path --silent | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "pnpm store path failed with exit code $LASTEXITCODE" }
+          if (-not $storePath) { throw "pnpm store path printed an empty path" }
+          "path=$storePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
+      - name: Cache pnpm store
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ steps.pnpm-store.outputs.path }}/files
+            ${{ steps.pnpm-store.outputs.path }}/index.db
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
-          cache: "npm"
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
+      - name: Verify global virtual store
+        run: pnpm config get virtualStoreType
       - name: Check oxfmt formatting
-        run: npm run format:oxfmt:check
+        run: pnpm run format:oxfmt:check
       - name: Build frontend
-        run: npm run build
+        run: pnpm run build
 
   ci-success:
     name: ci-success
