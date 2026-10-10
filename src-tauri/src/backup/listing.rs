@@ -2,14 +2,43 @@ use super::common::{HASH_FILE_NAME, LOCKED_FILE_NAME};
 use super::data::BackupInfo;
 use super::index::BackupStore;
 use crate::filename_utils;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
+
+#[cfg(test)]
+thread_local! {
+    /// Games whose backup folders fail the metadata read, simulating a per-folder I/O error.
+    pub(crate) static FAILING_GAMES: std::cell::RefCell<HashSet<u32>> =
+        std::cell::RefCell::new(HashSet::new());
+}
 
 /// Lists all backups available in the .backups directory.
 pub fn get_backups(
     save_dir: &Path,
     include_hash: bool,
     game_filter: Option<u32>,
+) -> Result<Vec<BackupInfo>, String> {
+    let games = game_filter.map(|game| HashSet::from([game]));
+    list_backups(save_dir, include_hash, games.as_ref())
+}
+
+/// Lists backups of the given games with a single enumeration of the .backups directory.
+///
+/// Folders of other games are rejected before any metadata or hash read.
+pub fn get_backups_for_games(
+    save_dir: &Path,
+    include_hash: bool,
+    games: &HashSet<u32>,
+) -> Result<Vec<BackupInfo>, String> {
+    list_backups(save_dir, include_hash, Some(games))
+}
+
+/// Shared listing; `None` lists every game.
+fn list_backups(
+    save_dir: &Path,
+    include_hash: bool,
+    game_filter: Option<&HashSet<u32>>,
 ) -> Result<Vec<BackupInfo>, String> {
     let store = match BackupStore::load_if_exists(save_dir)? {
         Some(s) => s,
@@ -47,14 +76,14 @@ pub(crate) fn backup_info_from_folder(
     folder_name: &str,
     save_dir: &Path,
     include_hash: bool,
-    game_filter: Option<u32>,
+    game_filter: Option<&HashSet<u32>>,
 ) -> Result<Option<BackupInfo>, String> {
     let Some(info) = filename_utils::parse_backup_folder_name(folder_name) else {
         return Ok(None);
     };
 
     if let Some(filter) = game_filter {
-        if info.game_number != filter {
+        if !filter.contains(&info.game_number) {
             return Ok(None);
         }
     }
@@ -67,6 +96,11 @@ pub(crate) fn backup_info_from_folder(
             path
         );
         return Ok(None);
+    }
+
+    #[cfg(test)]
+    if FAILING_GAMES.with(|games| games.borrow().contains(&info.game_number)) {
+        return Err(format!("injected metadata failure for {:?}", path));
     }
 
     let size = fs::metadata(&main_file_path)

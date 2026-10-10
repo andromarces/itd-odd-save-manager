@@ -14,7 +14,7 @@ mod tests;
 // Re-export public API to maintain compatibility or ease of use
 pub use cleanup::{delete_backup_folder, delete_backups_batch};
 pub use data::BackupInfo;
-pub use listing::get_backups;
+pub use listing::{get_backups, get_backups_for_games};
 pub use notes::{set_backup_lock, set_backup_note};
 pub use restore::restore_backup;
 

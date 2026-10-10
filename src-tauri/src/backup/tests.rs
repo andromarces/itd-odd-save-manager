@@ -10,9 +10,10 @@ mod tests {
     use crate::backup::data::{build_save_paths, BackupInfo};
     use crate::backup::hashing::calculate_hash;
     use crate::backup::index::BackupStore;
-    use crate::backup::listing::{backup_info_from_folder, get_backups};
+    use crate::backup::listing::{backup_info_from_folder, get_backups, get_backups_for_games};
     use crate::backup::notes::{set_backup_lock, set_backup_note};
     use crate::backup::restore::restore_backup;
+    use std::collections::HashSet;
     use std::fs::{self, File};
     use std::io::Write;
     use std::path::PathBuf;
@@ -44,6 +45,40 @@ mod tests {
         let result =
             backup_info_from_folder(&invalid_folder, "not-a-backup", save_dir, true, None).unwrap();
         assert!(result.is_none());
+    }
+
+    /// Tests that a set filter lists only the backups of the requested games in one call.
+    /// Not redundant: `get_backups` only covers a single game or all games, not a subset.
+    #[test]
+    fn test_get_backups_for_games_returns_only_requested_games() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+
+        for game_number in 0..3 {
+            fs::write(save_dir.join(format!("gamesave_{game_number}.sav")), "data").unwrap();
+            perform_backup_for_game(save_dir, game_number, 100).unwrap();
+        }
+
+        let requested: HashSet<u32> = HashSet::from([0, 2]);
+        let backups = get_backups_for_games(save_dir, true, &requested).unwrap();
+
+        let listed: HashSet<u32> = backups.iter().map(|b| b.game_number).collect();
+        assert_eq!(backups.len(), 2);
+        assert_eq!(listed, requested);
+        assert!(backups.iter().all(|b| !b.hash.is_empty()));
+    }
+
+    /// Tests that an empty game set lists nothing.
+    /// Not redundant: guards the boundary between "no filter" (`None`) and "empty filter".
+    #[test]
+    fn test_get_backups_for_games_empty_set_returns_nothing() {
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        fs::write(save_dir.join("gamesave_0.sav"), "data").unwrap();
+        perform_backup_for_game(save_dir, 0, 100).unwrap();
+
+        let backups = get_backups_for_games(save_dir, true, &HashSet::new()).unwrap();
+        assert!(backups.is_empty());
     }
 
     /// Tests the complete backup flow including folder creation, deduplication, and file copying.
