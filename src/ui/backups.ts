@@ -341,7 +341,6 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
       "restore_backup_command",
       {
         backup_path: backup.path,
-        target_path: backup.original_path,
       },
       "restore backup",
       {
