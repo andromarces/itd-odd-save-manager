@@ -37,5 +37,8 @@
   "lint-staged": {
     "!(*.rs)": "node ./scripts/run-oxfmt-tracked.mjs",
     "**/*.rs": "rustfmt --edition 2021"
+  },
+  "engines": {
+    "node": "^24.15.0 || >=26.0.0"
   }
 }

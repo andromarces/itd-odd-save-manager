@@ -7,7 +7,7 @@ This document outlines how to build the ITD ODD Save Manager from source. The pr
 ### General
 
 - **Git**: For version control.
-- **Node.js**: Version 20 (LTS).
+- **Node.js**: Version 26 for CI and release builds (the version is set in `.nvmrc`). Local development also works on Node.js 24.15.0 or a later 24.x release. Node.js 25 is not supported.
 - **Rust**: Minimum supported version 1.95.0. The build toolchain is pinned to 1.99.0 in `rust-toolchain.toml`, and `rustup` installs it automatically on the first build.
 
 ### Windows
