@@ -4,7 +4,34 @@ use super::hashing::calculate_hash;
 use super::index::{BackupStore, IndexEntry};
 use crate::filename_utils;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Resolves the canonical backup folder and checks it against the canonical `.backups` root of
+/// the target. The folder must be a direct child of that root with a valid backup folder name.
+/// Both the pre-copy guard and the index update use this check, so they cannot disagree.
+fn validate_backup_source(
+    backup_folder_path: &Path,
+    target_save_dir: &Path,
+) -> Result<(PathBuf, String, filename_utils::BackupFolderInfo), String> {
+    let source = backup_folder_path
+        .canonicalize()
+        .map_err(|_| "Backup folder does not exist".to_string())?;
+    let backup_root = target_save_dir
+        .join(BACKUP_DIR_NAME)
+        .canonicalize()
+        .map_err(|_| "Target .backups directory not found".to_string())?;
+    if source.parent() != Some(backup_root.as_path()) {
+        return Err("Backup folder is not under the target .backups directory".to_string());
+    }
+    let folder_name = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Backup folder name is invalid".to_string())?
+        .to_string();
+    let info = filename_utils::parse_backup_folder_name(&folder_name)
+        .ok_or_else(|| "Backup folder name did not match expected format".to_string())?;
+    Ok((source, folder_name, info))
+}
 
 /// Restores a backup folder to the save directory.
 pub fn restore_backup(backup_folder_path: &Path, target_save_dir: &Path) -> Result<(), String> {
@@ -14,6 +41,9 @@ pub fn restore_backup(backup_folder_path: &Path, target_save_dir: &Path) -> Resu
     if !target_save_dir.exists() {
         return Err("Target save directory does not exist".to_string());
     }
+    // Validate before any file is copied.
+    let (backup_folder_path, _, _) = validate_backup_source(backup_folder_path, target_save_dir)?;
+    let backup_folder_path = backup_folder_path.as_path();
 
     let mut restored_any = false;
 
@@ -49,16 +79,7 @@ fn update_index_after_restore(
     backup_folder_path: &Path,
     target_save_dir: &Path,
 ) -> Result<(), String> {
-    let folder_name = backup_folder_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| "Backup folder name is invalid".to_string())?;
-    let info = filename_utils::parse_backup_folder_name(folder_name)
-        .ok_or_else(|| "Backup folder name did not match expected format".to_string())?;
-    let backup_root = target_save_dir.join(BACKUP_DIR_NAME);
-    if !backup_folder_path.starts_with(&backup_root) {
-        return Err("Backup folder is not under the target .backups directory".to_string());
-    }
+    let (_, folder_name, info) = validate_backup_source(backup_folder_path, target_save_dir)?;
 
     let paths = build_save_paths(target_save_dir, info.game_number);
     if !paths.main_path.exists() {
@@ -88,7 +109,7 @@ fn update_index_after_restore(
             last_hash: hash,
             last_source_size: source.size,
             last_source_modified: source.modified_nanos,
-            last_backup_path: folder_name.to_string(),
+            last_backup_path: folder_name,
         },
     );
     store.save()

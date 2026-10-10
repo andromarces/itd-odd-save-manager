@@ -217,13 +217,29 @@ mod tests {
 
     const VALID_FOLDER: &str = "Game 1 - 01-Jan-2024 10-00-00 AM";
 
-    /// Creates a directory symlink. Returns false when the platform denies it.
-    fn try_symlink_dir(original: &Path, link: &Path) -> bool {
+    /// Creates a directory link: a symlink, or on Windows a junction when symlinks are denied.
+    /// Returns false when the platform denies both. CI always sets `CI`, and a denied link there
+    /// fails the test instead of skipping it.
+    fn try_link_dir(original: &Path, link: &Path) -> bool {
         #[cfg(unix)]
-        let result = std::os::unix::fs::symlink(original, link);
+        let created = std::os::unix::fs::symlink(original, link).is_ok();
         #[cfg(windows)]
-        let result = std::os::windows::fs::symlink_dir(original, link);
-        result.is_ok()
+        let created = std::os::windows::fs::symlink_dir(original, link).is_ok()
+            || std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(original)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+        if !created {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "directory link creation must work on CI"
+            );
+            eprintln!("SKIPPED: directory link creation denied on this machine; CI runs this test");
+        }
+        created
     }
 
     /// Verifies that the backup root, nested descendants, and malformed folder names are rejected.
@@ -245,24 +261,72 @@ mod tests {
         assert!(verify_backup_path(&save_path, &save_path).is_err());
     }
 
-    /// Verifies that a symlink inside the backup root that points outside it is rejected.
+    /// Verifies that a link inside the backup root that points outside it is rejected by the
+    /// containment guard alone: the link target carries a valid backup folder name.
     #[test]
     fn test_verify_backup_path_rejects_symlink_escape() {
         use std::fs;
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let save_path = temp_dir.path().join("saves");
         let backup_root = save_path.join(BACKUP_DIR_NAME);
-        let outside = temp_dir.path().join("outside");
+        let outside = temp_dir.path().join("outside").join(VALID_FOLDER);
         fs::create_dir_all(&backup_root).expect("failed to create backup root");
         fs::create_dir_all(&outside).expect("failed to create outside dir");
 
         let link = backup_root.join(VALID_FOLDER);
-        if !try_symlink_dir(&outside, &link) {
-            eprintln!("symlink creation unavailable; skipping");
+        if !try_link_dir(&outside, &link) {
             return;
         }
 
-        assert!(verify_backup_path(&save_path, &link).is_err());
+        let err = verify_backup_path(&save_path, &link).expect_err("escape must be rejected");
+        assert!(
+            err.contains("Security violation"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Verifies that a linked `.backups` root is accepted by validation and restore alike, so the
+    /// up-front guard and the index update agree.
+    #[test]
+    fn test_symlinked_backup_root_validates_and_restores() {
+        use std::fs;
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let save_path = temp_dir.path().join("saves");
+        let real_root = temp_dir.path().join("real_backups");
+        let folder = real_root.join(VALID_FOLDER);
+        fs::create_dir_all(&save_path).expect("failed to create save dir");
+        fs::create_dir_all(&folder).expect("failed to create backup folder");
+        fs::write(folder.join("gamesave_0.sav"), b"data").expect("failed to write backup save");
+
+        if !try_link_dir(&real_root, &save_path.join(BACKUP_DIR_NAME)) {
+            return;
+        }
+
+        let verified = verify_backup_path(
+            &save_path,
+            &save_path.join(BACKUP_DIR_NAME).join(VALID_FOLDER),
+        )
+        .expect("linked root must validate");
+        let target = save_path
+            .canonicalize()
+            .expect("failed to canonicalize save dir");
+        backup::restore_backup(&verified, &target).expect("restore must succeed");
+        assert!(save_path.join("gamesave_0.sav").exists());
+    }
+
+    /// Verifies that restore rejects a source outside the backup root before copying any file.
+    #[test]
+    fn test_restore_rejects_outside_source_before_copy() {
+        use std::fs;
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let save_path = temp_dir.path().join("saves");
+        let outside = temp_dir.path().join("outside").join(VALID_FOLDER);
+        fs::create_dir_all(save_path.join(BACKUP_DIR_NAME)).expect("failed to create backup root");
+        fs::create_dir_all(&outside).expect("failed to create outside dir");
+        fs::write(outside.join("gamesave_0.sav"), b"data").expect("failed to write save");
+
+        assert!(backup::restore_backup(&outside, &save_path).is_err());
+        assert!(!save_path.join("gamesave_0.sav").exists());
     }
 
     /// Verifies the security logic of the verify_backup_path helper.
