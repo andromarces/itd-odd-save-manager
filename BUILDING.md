@@ -8,6 +8,7 @@ This document outlines how to build the ITD ODD Save Manager from source. The pr
 
 - **Git**: For version control.
 - **Node.js**: Version 26 for CI and release builds (the version is set in `.nvmrc`). Local development also works on Node.js 24.15.0 or a later 24.x release. Node.js 25 is not supported.
+- **pnpm**: The exact version in the `packageManager` field of `package.json` (12.10.1). Install it with the [standalone installer](https://pnpm.io/installation). Corepack is not used.
 - **Rust**: Minimum supported version 1.95.0. The build toolchain is pinned to 1.99.0 in `rust-toolchain.toml`, and `rustup` installs it automatically on the first build.
 
 ### Windows
@@ -26,14 +27,14 @@ This document outlines how to build the ITD ODD Save Manager from source. The pr
 2. **Install Frontend Dependencies**
 
    ```bash
-   npm ci
+   pnpm install --frozen-lockfile
    ```
 
-   _Note: `npm ci` is recommended over `npm install` for reproducible environments as it respects `package-lock.json` strictly. Running `npm ci` also invokes the `prepare` lifecycle script, which installs the Husky git hooks automatically._
+   _Note: `--frozen-lockfile` gives reproducible environments because it fails if `pnpm-lock.yaml` does not match `package.json`. The install also runs the `prepare` lifecycle script, which installs the Husky git hooks automatically. `pnpm-workspace.yaml` sets `virtualStoreType: global`, so `node_modules` entries link into the shared pnpm store (run `pnpm store path` to locate it)._
 
 ## Git Hooks
 
-Git hooks are managed by [Husky](https://typicode.github.io/husky) and run automatically after `npm ci`.
+Git hooks are managed by [Husky](https://typicode.github.io/husky) and run automatically after `pnpm install`.
 
 ### pre-commit
 
@@ -87,20 +88,20 @@ Checks execute in fail-fast order. The first failure stops all subsequent checks
 3. **Build Frontend**
 
    ```bash
-   npm run build
+   pnpm run build
    ```
 
    To format the tracked non-Rust files that `oxfmt` supports, run:
 
    ```bash
-   npm run format:oxfmt
+   pnpm run format:oxfmt
    ```
 
 4. **Build Application**
    To build the release artifacts (installer and executable):
 
    ```bash
-   npm run tauri build
+   pnpm run tauri build
    ```
 
    - The artifacts will be located in `src-tauri/target/release/bundle/`.

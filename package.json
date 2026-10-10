@@ -11,8 +11,8 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "tauri": "tauri",
-    "format": "npm run format:oxfmt && npm run format:rust",
-    "format:check": "npm run format:oxfmt:check && npm run format:rust:check",
+    "format": "pnpm run format:oxfmt && pnpm run format:rust",
+    "format:check": "pnpm run format:oxfmt:check && pnpm run format:rust:check",
     "format:oxfmt": "node ./scripts/run-oxfmt-tracked.mjs",
     "format:oxfmt:check": "node ./scripts/run-oxfmt-tracked.mjs --check",
     "format:rust": "cd src-tauri && cargo fmt",
@@ -40,5 +40,6 @@
   },
   "engines": {
     "node": "^24.15.0 || >=26.0.0"
-  }
+  },
+  "packageManager": "pnpm@12.10.1"
 }

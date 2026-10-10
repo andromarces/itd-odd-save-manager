@@ -5,6 +5,10 @@ on:
       - "v*"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     permissions:
@@ -19,17 +23,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          cache: true
+
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
-          cache: "npm"
 
       - name: Install Frontend Dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify global virtual store
+        run: pnpm config get virtualStoreType
 
       - name: Build Frontend
-        run: npm run build
+        run: pnpm run build
 
       - name: Read Rust toolchain
         id: rust-toolchain
@@ -52,7 +63,7 @@ jobs:
       - name: Build Tauri App
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run tauri build
+        run: pnpm run tauri build
 
       - name: Prepare Artifacts
         shell: pwsh
