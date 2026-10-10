@@ -1,4 +1,5 @@
 use super::common::{BACKUP_DIR_NAME, INDEX_FILE_NAME};
+use super::data::SourceMetadata;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -26,6 +27,19 @@ pub(crate) struct IndexEntry {
     pub(crate) last_source_size: u64,
     pub(crate) last_source_modified: u128, // Unix timestamp in nanoseconds
     pub(crate) last_backup_path: String,   // Relative folder name of the last backup
+}
+
+impl IndexEntry {
+    /// Builds an entry from a content hash and the source file metadata.
+    /// `SourceMetadata::modified_nanos` maps to `last_source_modified`.
+    pub(crate) fn from_source(hash: String, source: &SourceMetadata, folder_name: String) -> Self {
+        Self {
+            last_hash: hash,
+            last_source_size: source.size,
+            last_source_modified: source.modified_nanos,
+            last_backup_path: folder_name,
+        }
+    }
 }
 
 /// Ensures the backup root directory exists and returns its path.
