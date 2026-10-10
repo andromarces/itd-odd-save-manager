@@ -485,7 +485,7 @@ export function checkRustfmt(files, run = spawnSync) {
 export function checkOxlint(files, run = spawnSync) {
   const result = run(
     "oxlint",
-    ["--config", ".oxlintrc.json", "--report-unused-disable-directives", ...files],
+    ["--config", ".oxlintrc.json", "--report-unused-disable-directives-severity=error", ...files],
     {
       stdio: "inherit",
       ...SHELL_ON_WIN,

@@ -10,7 +10,7 @@
     "test": "vp test watch",
     "test:run": "vp test",
     "test:coverage": "vp test run --coverage",
-    "lint": "oxlint --config .oxlintrc.json --report-unused-disable-directives",
+    "lint": "oxlint --config .oxlintrc.json --report-unused-disable-directives-severity=error",
     "tauri": "tauri",
     "format": "pnpm run format:oxfmt && pnpm run format:rust",
     "format:check": "pnpm run format:oxfmt:check && pnpm run format:rust:check",

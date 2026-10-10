@@ -61,7 +61,7 @@ Checks execute in fail-fast order. The first failure stops all subsequent checks
    (`*.{css,html,json,json5,jsonc,js,jsx,md,mdx,ts,tsx,toml,vue,yaml,yml}`).
 5. **Rust format check**: checks changed `.rs` files with `rustfmt --check --edition 2021`.
 6. **oxlint**: lints changed JS/TS/framework files using `.oxlintrc.json`
-   (`no-debugger` enforced; jsdoc plugin loaded for future rule expansion).
+   (`no-debugger` enforced; jsdoc plugin loaded for future rule expansion). An unused disable directive is an error (`--report-unused-disable-directives-severity=error`).
 7. **Doc comment heuristic**: flags named JS/TS function declarations, exported const
    arrow functions, and Rust `pub fn` declarations that lack a preceding documentation comment.
    Class methods and private Rust functions are out of scope (high false-positive risk without
@@ -111,16 +111,16 @@ Checks execute in fail-fast order. The first failure stops all subsequent checks
 
 The frontend toolchain runs through [Vite+](https://viteplus.dev/guide/) (`vp`), installed as the `vite-plus` devDependency. No global `vp` install is needed.
 
-| Script                   | Command                                                             |
-| ------------------------ | ------------------------------------------------------------------- |
-| `pnpm run dev`           | `vp dev`, serves `http://localhost:5173`                            |
-| `pnpm run build`         | `tsc && vp build`, type-checks `src` before the bundle              |
-| `pnpm run preview`       | `vp preview`, serves `dist/`                                        |
-| `pnpm run test`          | `vp test watch`                                                     |
-| `pnpm run test:run`      | `vp test`, a single run of all frontend and `scripts/` tests        |
-| `pnpm run test:coverage` | `vp test run --coverage`, writes `coverage/`                        |
-| `pnpm run lint`          | `oxlint --config .oxlintrc.json --report-unused-disable-directives` |
-| `pnpm run format:oxfmt`  | `node ./scripts/run-oxfmt-tracked.mjs`                              |
+| Script                   | Command                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| `pnpm run dev`           | `vp dev`, serves `http://localhost:5173`                                           |
+| `pnpm run build`         | `tsc && vp build`, type-checks `src` before the bundle                             |
+| `pnpm run preview`       | `vp preview`, serves `dist/`                                                       |
+| `pnpm run test`          | `vp test watch`                                                                    |
+| `pnpm run test:run`      | `vp test`, a single run of all frontend and `scripts/` tests                       |
+| `pnpm run test:coverage` | `vp test run --coverage`, writes `coverage/`                                       |
+| `pnpm run lint`          | `oxlint --config .oxlintrc.json --report-unused-disable-directives-severity=error` |
+| `pnpm run format:oxfmt`  | `node ./scripts/run-oxfmt-tracked.mjs`                                             |
 
 ## Migrating an Existing Clone
 

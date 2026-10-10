@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   checkForbiddenPaths,
   checkGitignoreSanity,
+  checkOxlint,
   checkRustSuppressions,
   checkSuppressionComments,
   classifyFiles,
@@ -362,6 +363,36 @@ describe("checkRustSuppressions", () => {
     // Req: Rust suppression scan applies only to .rs files.
     const content = "#![allow(dead_code)]\n";
     expect(checkRustSuppressions(["src/a.ts"], () => content)).toEqual([]);
+  });
+});
+
+describe("checkOxlint", () => {
+  it("makes an unused disable directive an error and lints the supplied files", () => {
+    // Req: the standalone lint step must fail on an unused disable directive, which oxlint
+    //      reports only as a warning (exit 0) unless the severity flag is set to error.
+    const run = vi.fn(() => ({ status: 0 }));
+
+    expect(checkOxlint(["src/a.ts", "scripts/b.mjs"], run)).toBe(0);
+
+    const [, args] = run.mock.calls[0];
+    expect(args).toContain("--report-unused-disable-directives-severity=error");
+    expect(args.slice(-2)).toEqual(["src/a.ts", "scripts/b.mjs"]);
+  });
+
+  it("returns the lint exit code and treats a spawn failure as a failure", () => {
+    // Req: lint failures block the push, including when the tool cannot be spawned.
+    expect(
+      checkOxlint(
+        ["src/a.ts"],
+        vi.fn(() => ({ status: 1 })),
+      ),
+    ).toBe(1);
+    expect(
+      checkOxlint(
+        ["src/a.ts"],
+        vi.fn(() => ({ status: null })),
+      ),
+    ).toBe(1);
   });
 });
 
