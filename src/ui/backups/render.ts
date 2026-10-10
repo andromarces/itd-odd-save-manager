@@ -39,19 +39,18 @@ export function createBackupRow(backup: BackupInfo): HTMLTableRowElement {
   const actionCell = document.createElement("td");
   actionCell.appendChild(createActionButton("Restore", backup.path, "restore"));
   actionCell.appendChild(
-    createActionButton("Lock", backup.path, "lock", backup.locked ? "Unlock" : "Lock", "secondary"),
+    createActionButton(backup.locked ? "Unlock" : "Lock", backup.path, "lock", "secondary"),
   );
   actionCell.appendChild(
     createActionButton(
       "Note",
       backup.path,
       "note",
-      "Note",
       "secondary",
       backup.note ? "Edit Note" : "Add Note",
     ),
   );
-  actionCell.appendChild(createActionButton("Delete", backup.path, "delete", "Delete", "danger"));
+  actionCell.appendChild(createActionButton("Delete", backup.path, "delete", "danger"));
 
   row.appendChild(fileCell);
   row.appendChild(dateCell);
@@ -81,17 +80,15 @@ function createActionButton(
   label: string,
   id: string,
   action: string,
-  displayLabel?: string,
   className?: string,
   title?: string,
 ): HTMLButtonElement {
   const btn = document.createElement("button");
-  btn.textContent = displayLabel || label;
+  btn.textContent = label;
   const baseClassName = `small ${className || ""}`.trim();
   btn.className = action === "lock" ? `${baseClassName} lock-toggle`.trim() : baseClassName;
   btn.dataset.backupId = id;
   btn.dataset.action = action;
   if (title) btn.title = title;
-  if (action !== "restore") btn.style.marginLeft = "8px";
   return btn;
 }

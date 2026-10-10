@@ -41,6 +41,15 @@ describe("createBackupRow", () => {
     const cellWithDate = cells.find((cell) => cell.textContent === formattedDate);
     expect(cellWithDate).toBeDefined();
   });
+
+  // Requirement: the lock button label reflects lock state; other buttons keep fixed labels.
+  it("labels the lock button by lock state and keeps the other action labels", () => {
+    const labels = (backup: BackupInfo) =>
+      Array.from(createBackupRow(backup).querySelectorAll("button")).map((b) => b.textContent);
+
+    expect(labels(createBackup({ locked: false }))).toEqual(["Restore", "Lock", "Note", "Delete"]);
+    expect(labels(createBackup({ locked: true }))).toEqual(["Restore", "Unlock", "Note", "Delete"]);
+  });
 });
 
 describe("createNoteRow", () => {

@@ -11,8 +11,6 @@ import {
 } from "./backups/render";
 import { MasterDeleteController } from "./backups/dialog";
 
-export { getBackupDisplayName, buildRestoreConfirmationMessage };
-
 type BackupsElements = Pick<
   AppElements,
   | "manualInput"
@@ -303,28 +301,13 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
     if (success !== undefined) {
       // Find index by path, not object identity, to handle potential list refreshes
       // Assumption: backup.path is unique and stable (canonicalized by backend)
+      // A missing entry means a concurrent refresh already replaced the list
+      // (and re-rendered the table) without the deleted backup, so nothing is left to do.
       const index = currentBackups.findIndex((b) => b.path === backup.path);
       if (index > -1) {
         currentBackups.splice(index, 1);
         currentBackupsMap.delete(backup.path);
         renderBackups(currentBackups);
-      } else {
-        // Fallback: if we can't find it locally (maybe list refreshed)
-        if (elements.manualInput.value) {
-          void loadBackups();
-        } else {
-          // If input is empty, we can't reload, but we can try to clean up the stale DOM row
-          const row = findRowByBackupId(backup.path);
-          if (row) {
-            // Read the sibling before detaching; a detached row has no sibling
-            const nextSibling = row.nextElementSibling;
-            rowMap.delete(backup.path);
-            row.remove();
-            if (nextSibling?.classList.contains("note-row")) {
-              nextSibling.remove();
-            }
-          }
-        }
       }
     }
   }
@@ -374,11 +357,6 @@ export function createBackupsFeature(elements: BackupsElements): BackupsFeature 
           void deleteBackup(backup);
         }
       }
-      return;
-    }
-
-    const row = target.closest("tr");
-    if (row && row.classList.contains("note-row")) {
       return;
     }
   }
