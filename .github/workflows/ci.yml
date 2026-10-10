@@ -102,6 +102,8 @@ jobs:
           node-version-file: .nvmrc
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Verify pnpm version
+        run: pnpm --version
       - name: Verify global virtual store
         run: pnpm config get virtualStoreType
       - name: Check oxfmt formatting
