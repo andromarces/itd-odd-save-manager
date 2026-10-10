@@ -69,13 +69,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Setup pnpm
-        # pnpm/setup downloads the pinned release binary directly. It reads
-        # `packageManager` and skips the npm bootstrap and self-switch that
-        # pnpm/action-setup runs.
-        uses: pnpm/setup@v3
+        uses: pnpm/action-setup@v6
         with:
-          install: false
-          node-version-file: false
+          standalone: true
       # Cache only the content-addressable files and index. The global virtual
       # store (`links`) holds symlinks that Git's MSYS tar restores as links
       # that native pnpm cannot read (Access is denied).
