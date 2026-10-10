@@ -30,8 +30,13 @@ jobs:
       # that native pnpm cannot read (Access is denied).
       - name: Get pnpm store path
         id: pnpm-store
-        shell: bash
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $storePath = (pnpm store path --silent | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "pnpm store path failed with exit code $LASTEXITCODE" }
+          if (-not $storePath) { throw "pnpm store path printed an empty path" }
+          "path=$storePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
       - name: Cache pnpm store
         uses: actions/cache@v6
         with:
