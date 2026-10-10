@@ -48,7 +48,7 @@ Runs `scripts/pre-push-enforce.mjs` against files changed between the resolved b
 The diff base is resolved as follows: `@{upstream}` when configured, otherwise the merge-base
 against `origin/main` or `origin/master`, and skipped entirely when neither is reachable.
 
-Checks execute in fail-fast order — the first failure stops all subsequent checks:
+Checks execute in fail-fast order. The first failure stops all subsequent checks:
 
 1. **Forbidden paths**: rejects `.env` and `.env.*` files.
 2. **Gitignore sanity**: verifies `.gitignore` contains both `.env` and `.env.*` entries.

@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backup row lookup uses a row map.
 - Watcher reliability and state consistency are improved.
 - Backup file hashing is improved.
-- Frontend tests are split into domain-specific UI modules.
+- `main.test.ts` is refactored to import domain-specific UI modules.
 - Linux support is removed. The application targets Windows only.
 - CI skips tests and build for Dependabot pull requests.
 - Dependencies are updated through Dependabot.
