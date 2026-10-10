@@ -68,7 +68,7 @@ Windows only.
 ### Prerequisites
 
 - Rust: minimum supported version 1.95.0. The build toolchain is pinned to 1.99.0 in `rust-toolchain.toml`, and `rustup` installs it automatically.
-- Node.js 20 (LTS) & npm
+- Node.js 26 (CI and release builds; the version is set in `.nvmrc`) & npm. Local development also works on Node.js 24.15.0 or a later 24.x release. Node.js 25 is not supported.
 
 ### Setup
 
