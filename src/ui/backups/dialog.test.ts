@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { AppElements } from "../dom";
 import { MasterDeleteController } from "./dialog";
 import * as uiUtils from "../../ui_utils";

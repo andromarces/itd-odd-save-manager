@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { getInvokeErrorMessage } from "./ui_utils";
 import { INIT_WATCHER_DEFERRED_MESSAGE, isInitWatcherDeferredError } from "./watcher_init";
