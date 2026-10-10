@@ -6,6 +6,13 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+#[cfg(test)]
+thread_local! {
+    /// Games whose backup folders fail the metadata read, simulating a per-folder I/O error.
+    pub(crate) static FAILING_GAMES: std::cell::RefCell<HashSet<u32>> =
+        std::cell::RefCell::new(HashSet::new());
+}
+
 /// Lists all backups available in the .backups directory.
 pub fn get_backups(
     save_dir: &Path,
@@ -89,6 +96,11 @@ pub(crate) fn backup_info_from_folder(
             path
         );
         return Ok(None);
+    }
+
+    #[cfg(test)]
+    if FAILING_GAMES.with(|games| games.borrow().contains(&info.game_number)) {
+        return Err(format!("injected metadata failure for {:?}", path));
     }
 
     let size = fs::metadata(&main_file_path)

@@ -2,7 +2,7 @@
 
 use crate::backup::{ensure_backup_root, load_index, perform_backup_for_game_internal, save_index};
 use crate::filename_utils;
-use log::{error, info};
+use log::{error, info, warn};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -156,17 +156,33 @@ fn perform_batch_backups(save_dir: &Path, game_numbers: &HashSet<u32>, limit: us
 
         // One enumeration for the whole batch. Each game only reads and prunes its own
         // backups, so the shared list stays valid across iterations.
-        let backups =
-            crate::backup::get_backups_for_games(save_dir, true, game_numbers).unwrap_or_default();
+        let shared = crate::backup::get_backups_for_games(save_dir, true, game_numbers);
+        if let Err(e) = &shared {
+            warn!(
+                "Shared backup listing failed ({}); listing each game separately.",
+                e
+            );
+        }
 
         for &game_number in game_numbers {
+            // A listing error must only affect the game that owns the failing folder, so on
+            // failure each game lists on its own, as before the shared listing.
+            let own_listing;
+            let backups = match &shared {
+                Ok(all) => all,
+                Err(_) => {
+                    own_listing = crate::backup::get_backups(save_dir, true, Some(game_number))
+                        .unwrap_or_default();
+                    &own_listing
+                }
+            };
             match perform_backup_for_game_internal(
                 save_dir,
                 &backup_root,
                 game_number,
                 &mut index,
                 limit,
-                &backups,
+                backups,
             ) {
                 Ok(Some(_)) => backups_created = true,
                 Ok(None) => {}
@@ -281,6 +297,37 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
     use tempfile::tempdir;
+
+    /// Verifies that a listing error in one game's backup folder does not disable the retention
+    /// limit for a healthy game in the same batch.
+    /// Not redundant: no other test combines a failing folder with a multi-game batch.
+    #[test]
+    fn test_batch_listing_error_in_one_game_keeps_other_game_limit() {
+        use crate::backup::listing::FAILING_GAMES;
+        use chrono::{Local, TimeZone};
+
+        let dir = tempdir().unwrap();
+        let save_dir = dir.path();
+        std::fs::write(save_dir.join("gamesave_0.sav"), "new data 0").unwrap();
+        std::fs::write(save_dir.join("gamesave_1.sav"), "new data 1").unwrap();
+
+        let backup_root = ensure_backup_root(save_dir).unwrap();
+        for (game, year) in [(0, 2020), (0, 2021), (1, 2020)] {
+            let stamp = Local.with_ymd_and_hms(year, 1, 1, 10, 0, 0).unwrap();
+            let folder = backup_root.join(filename_utils::format_backup_folder_name(game, stamp));
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join(format!("gamesave_{game}.sav")), "old").unwrap();
+            std::fs::write(folder.join(".hash"), format!("old-{game}-{year}")).unwrap();
+        }
+
+        FAILING_GAMES.with(|games| games.borrow_mut().insert(1));
+        let created = perform_batch_backups(save_dir, &HashSet::from([0, 1]), 2);
+        FAILING_GAMES.with(|games| games.borrow_mut().clear());
+
+        assert!(created);
+        let game_0 = crate::backup::get_backups(save_dir, true, Some(0)).unwrap();
+        assert_eq!(game_0.len(), 2, "limit must still prune the healthy game");
+    }
 
     /// Verifies that FileWatcher can start and stop without error.
     #[test]
