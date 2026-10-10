@@ -28,7 +28,7 @@ jobs:
       - name: Cache npm download cache
         uses: actions/cache@v6
         with:
-          path: ~/AppData/Local/npm-cache
+          path: C:/npm/cache
           key: npm-cache-${{ runner.os }}-pnpm-action-setup-v6
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
