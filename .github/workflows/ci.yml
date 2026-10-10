@@ -68,10 +68,15 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7
+      # The pnpm/action-setup bootstrap runs `npm ci`. Caching npm's download
+      # cache skips the bootstrap download.
+      - name: Cache npm download cache
+        uses: actions/cache@v6
+        with:
+          path: ~/AppData/Local/npm-cache
+          key: npm-cache-${{ runner.os }}-pnpm-action-setup-v6
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          standalone: true
       # Cache only the content-addressable files and index. The global virtual
       # store (`links`) holds symlinks that Git's MSYS tar restores as links
       # that native pnpm cannot read (Access is denied).
