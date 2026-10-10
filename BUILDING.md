@@ -66,7 +66,7 @@ Checks execute in fail-fast order. The first failure stops all subsequent checks
    arrow functions, and Rust `pub fn` declarations that lack a preceding documentation comment.
    Class methods and private Rust functions are out of scope (high false-positive risk without
    an AST parser) and remain manual-review only.
-8. **Cargo clippy**: runs `cargo clippy --all-targets -- -D warnings` in `src-tauri/` when
+8. **Cargo clippy**: runs `cargo clippy --all-targets -- -D warnings -W clippy::allow_attributes -W clippy::allow_attributes_without_reason` in `src-tauri/` when
    at least one `.rs` file changed.
 
 **Automated enforcement coverage:**

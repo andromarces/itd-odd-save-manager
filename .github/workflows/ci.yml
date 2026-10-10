@@ -57,7 +57,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings -W clippy::allow_attributes -W clippy::allow_attributes_without_reason
 
       - name: Run cargo tests
         run: cargo test --locked --all --verbose
