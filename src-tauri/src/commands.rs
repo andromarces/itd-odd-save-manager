@@ -358,6 +358,8 @@ mod tests {
         use std::fs;
         use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
+        const RESTORED_FILE: &str = "gamesave_0.sav";
+
         struct Fixture {
             _temp_dir: tempfile::TempDir,
             save_path: PathBuf,
@@ -374,6 +376,10 @@ mod tests {
             let outside = temp_dir.path().join("outside").join(VALID_FOLDER);
             fs::create_dir_all(&backup).expect("failed to create backup dir");
             fs::create_dir_all(&outside).expect("failed to create outside dir");
+            // Save files in every candidate folder make a bypassed restore guard observable.
+            for dir in [&backup_root, &backup, &outside] {
+                fs::write(dir.join(RESTORED_FILE), b"data").expect("failed to write save file");
+            }
             Fixture {
                 _temp_dir: temp_dir,
                 save_path,
@@ -416,7 +422,8 @@ mod tests {
         }
 
         /// Returns the 8.3 form of an existing path, or `None` when the volume generates no
-        /// short name for it.
+        /// short name for it. Panics when `GetShortPathNameW` fails, so an API error never reads
+        /// as a missing alias.
         fn short_form(path: &Path) -> Option<PathBuf> {
             #[link(name = "kernel32")]
             extern "system" {
@@ -424,13 +431,23 @@ mod tests {
             }
             let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
             let mut buf = vec![0u16; 1024];
-            // SAFETY: `wide` is NUL-terminated and `buf` is writable for `buf.len()` units.
-            let written =
-                unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) }
-                    as usize;
-            if written == 0 || written > buf.len() {
-                return None;
-            }
+            let written = loop {
+                // SAFETY: `wide` is NUL-terminated and `buf` is writable for `buf.len()` units.
+                let written =
+                    unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) }
+                        as usize;
+                if written == 0 {
+                    panic!(
+                        "GetShortPathNameW failed for {path:?}: {}",
+                        std::io::Error::last_os_error()
+                    );
+                }
+                // A result above the buffer length is the required size, NUL included.
+                if written <= buf.len() {
+                    break written;
+                }
+                buf.resize(written, 0);
+            };
             let short = PathBuf::from(std::ffi::OsString::from_wide(&buf[..written]));
             let unchanged = short
                 .to_string_lossy()
@@ -487,38 +504,94 @@ mod tests {
             }
         }
 
-        /// Verifies the 8.3 short-name forms of the save path and backup folder are accepted and
-        /// the short-name forms of the root and an outside path are rejected. Skips when the
-        /// volume generates no short name.
+        /// Restores `backup_path` into `save_path` and reports whether the save file arrived. The
+        /// file is removed afterwards so cases stay independent.
+        fn restore_copies_file(fx: &Fixture, save_path: &Path, backup_path: &Path) -> bool {
+            let target = fx.save_path.join(RESTORED_FILE);
+            let _ = fs::remove_file(&target);
+            let restored = backup::restore_backup(backup_path, save_path).is_ok();
+            let copied = target.exists();
+            let _ = fs::remove_file(&target);
+            restored && copied
+        }
+
+        /// Verifies that restore (through `validate_backup_source`) accepts a valid backup folder
+        /// in every Windows path form.
         #[test]
-        fn test_verify_backup_path_handles_short_name_forms() {
+        fn test_restore_accepts_windows_forms_of_valid_backup() {
             let fx = fixture();
-            let (Some(short_save), Some(short_backup)) =
-                (short_form(&fx.save_path), short_form(&fx.backup))
-            else {
-                eprintln!("SKIPPED: volume generates no 8.3 short names");
+            for (name, form) in FORMS {
+                let cases = [
+                    ("backup path", fx.save_path.clone(), form(&fx.backup)),
+                    ("save path", form(&fx.save_path), fx.backup.clone()),
+                    ("both", form(&fx.save_path), form(&fx.backup)),
+                ];
+                for (side, save_path, backup_path) in cases {
+                    assert!(
+                        restore_copies_file(&fx, &save_path, &backup_path),
+                        "{name} on {side} was not restored"
+                    );
+                }
+            }
+        }
+
+        /// Verifies that restore rejects the backup root and a path outside it in every Windows
+        /// path form, and copies nothing.
+        #[test]
+        fn test_restore_rejects_windows_forms_of_root_and_outside() {
+            let fx = fixture();
+            for (name, form) in FORMS {
+                for (label, target) in [("root", &fx.backup_root), ("outside", &fx.outside)] {
+                    let cases = [
+                        (fx.save_path.clone(), form(target)),
+                        (form(&fx.save_path), form(target)),
+                    ];
+                    for (save_path, backup_path) in cases {
+                        assert!(
+                            !restore_copies_file(&fx, &save_path, &backup_path),
+                            "{name} form of {label} was restored"
+                        );
+                    }
+                }
+            }
+        }
+
+        /// Verifies the 8.3 short-name forms of the save path and backup folder are accepted and
+        /// the short-name forms of the root and an outside path are rejected, by both
+        /// `verify_backup_path` and restore. Skips only when the call succeeds and the volume made
+        /// no short name for the backup folder; an API failure panics.
+        #[test]
+        fn test_short_name_forms_are_contained() {
+            let fx = fixture();
+            let Some(short_backup) = short_form(&fx.backup) else {
+                eprintln!("SKIPPED: volume generates no 8.3 short name for the backup folder");
                 return;
             };
+            let short_save = short_form(&fx.save_path).unwrap_or_else(|| fx.save_path.clone());
+            let short_root = short_form(&fx.backup_root).expect("root short name missing");
+            let short_outside = short_form(&fx.outside).expect("outside short name missing");
             let expected = fx.backup.canonicalize().expect("failed to canonicalize");
 
-            assert_eq!(
-                verify_backup_path(&short_save, &fx.backup).expect("short save path rejected"),
-                expected
-            );
-            assert_eq!(
-                verify_backup_path(&fx.save_path, &short_backup).expect("short backup rejected"),
-                expected
-            );
-            assert_eq!(
-                verify_backup_path(&short_save, &short_backup).expect("short both rejected"),
-                expected
-            );
-
-            let short_root = short_form(&fx.backup_root).expect("root short name missing");
-            assert!(verify_backup_path(&fx.save_path, &short_root).is_err());
-            let short_outside = short_form(&fx.outside).expect("outside short name missing");
-            assert!(verify_backup_path(&fx.save_path, &short_outside).is_err());
-            assert!(verify_backup_path(&short_save, &short_outside).is_err());
+            for (save_path, backup_path) in [
+                (&short_save, &fx.backup),
+                (&fx.save_path, &short_backup),
+                (&short_save, &short_backup),
+            ] {
+                assert_eq!(
+                    verify_backup_path(save_path, backup_path).expect("short form rejected"),
+                    expected
+                );
+                assert!(restore_copies_file(&fx, save_path, backup_path));
+            }
+            for (save_path, backup_path) in [
+                (&fx.save_path, &short_root),
+                (&short_save, &short_root),
+                (&fx.save_path, &short_outside),
+                (&short_save, &short_outside),
+            ] {
+                assert!(verify_backup_path(save_path, backup_path).is_err());
+                assert!(!restore_copies_file(&fx, save_path, backup_path));
+            }
         }
     }
 }
