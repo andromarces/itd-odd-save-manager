@@ -8,6 +8,10 @@ Auto-save backup app for _Into the Dead: Our Darkest Days_.
 - **Manual Folder Selection**: Allows selecting a custom folder to watch.
 - **Automated Backups**: Watches for changes and creates timestamped backups automatically.
 - **Smart Restore**: browse and restore backups with easy confirmation.
+- **Backup Retention**: Limits the number of backups kept per game slot. The default is 100, and 0 means unlimited. The limit is set in the Settings tab. When the limit is reached, the oldest unlocked backups of that slot are deleted automatically.
+- **Locked Backups**: A locked backup is exempt from automatic limit enforcement and is skipped by batch deletion unless locked backups are explicitly included.
+- **Backup Notes**: A free-text note can be attached to each backup.
+- **Master Delete**: Batch deletion of backups by game slot. Options delete all backups or all except the latest, and include or exclude locked backups.
 - **Game Integration**:
   - Launch the game directly from the app.
   - **Auto-Launch**: Optional setting to launch the game when the app starts.
@@ -63,13 +67,13 @@ Windows only.
 
 ### Prerequisites
 
-- Rust 1.93.0
+- Rust: minimum supported version 1.95.0. The build toolchain is pinned to 1.99.0 in `rust-toolchain.toml`, and `rustup` installs it automatically.
 - Node.js 20 (LTS) & npm
 
 ### Setup
 
 1. Clone the repository.
-2. Run `npm install` to install dependencies and configure git hooks.
+2. Run `npm ci` to install dependencies from `package-lock.json` and configure git hooks.
    - This project uses a `pre-commit` hook (format-only) and a `pre-push` hook (diff-scoped, fail-fast policy enforcement). See [BUILDING.md](BUILDING.md) for details.
 
 ### Build
