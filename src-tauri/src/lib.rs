@@ -1,5 +1,6 @@
 // ITD ODD Save Manager by andromarces
 
+mod atomic_file;
 mod backup;
 mod commands;
 mod config;
