@@ -328,8 +328,8 @@ mod tests {
             }
         }
 
-        FAILING_GAMES.with(|games| games.borrow_mut().insert(1));
         let _reset = ClearFailingGames;
+        FAILING_GAMES.with(|games| games.borrow_mut().insert(1));
         let created = perform_batch_backups(save_dir, &HashSet::from([0, 1]), 2);
 
         assert!(created);
