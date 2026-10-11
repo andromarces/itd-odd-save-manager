@@ -25,7 +25,8 @@ pub fn get_backups(
 
 /// Lists backups of the given games with a single enumeration of the .backups directory.
 ///
-/// Folders of other games are rejected before any metadata or hash read.
+/// Each entry still gets a directory check. Folders of other games are then rejected before the
+/// per-folder reads: main-save existence check, metadata read, locked-marker check, and hash read.
 pub fn get_backups_for_games(
     save_dir: &Path,
     include_hash: bool,
