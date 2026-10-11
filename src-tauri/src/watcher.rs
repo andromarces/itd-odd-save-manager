@@ -320,9 +320,17 @@ mod tests {
             std::fs::write(folder.join(".hash"), format!("old-{game}-{year}")).unwrap();
         }
 
+        /// Clears the failure seam on drop, so a panic cannot leak it to a later test on this thread.
+        struct ClearFailingGames;
+        impl Drop for ClearFailingGames {
+            fn drop(&mut self) {
+                FAILING_GAMES.with(|games| games.borrow_mut().clear());
+            }
+        }
+
+        let _reset = ClearFailingGames;
         FAILING_GAMES.with(|games| games.borrow_mut().insert(1));
         let created = perform_batch_backups(save_dir, &HashSet::from([0, 1]), 2);
-        FAILING_GAMES.with(|games| games.borrow_mut().clear());
 
         assert!(created);
         let game_0 = crate::backup::get_backups(save_dir, true, Some(0)).unwrap();
