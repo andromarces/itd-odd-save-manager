@@ -1,4 +1,4 @@
-import { invokeAction, logActivity } from "../ui_utils";
+import { formatDate, invokeAction, logActivity } from "../ui_utils";
 import { listen } from "@tauri-apps/api/event";
 import type { AppElements } from "./dom";
 import type { BackupInfo } from "./types";
@@ -6,7 +6,6 @@ import {
   createBackupRow,
   createNoteRow,
   getBackupDisplayName,
-  formatDate,
   buildRestoreConfirmationMessage,
 } from "./backups/render";
 import { MasterDeleteController } from "./backups/dialog";

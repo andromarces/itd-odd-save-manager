@@ -1,5 +1,4 @@
 import { formatDate } from "../../ui_utils";
-export { formatDate };
 import type { BackupInfo } from "../types";
 
 /**
